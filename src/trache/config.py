@@ -70,7 +70,8 @@ def ensure_cache_structure(cache_dir: Path) -> None:
     for subdir in [
         "indexes",
         "clean/cards",
+        "clean/checklists",
         "working/cards",
-        "checklists",
+        "working/checklists",
     ]:
         (cache_dir / subdir).mkdir(parents=True, exist_ok=True)

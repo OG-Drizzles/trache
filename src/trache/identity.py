@@ -20,7 +20,7 @@ _BLOCK_PATTERN = re.compile(
 )
 
 
-def _fmt_date(dt: Optional[datetime]) -> str:
+def fmt_date(dt: Optional[datetime]) -> str:
     """Format datetime as 'YYYY-MM-DD HH:MM UTC' or 'None'."""
     if dt is None:
         return "None"
@@ -39,9 +39,9 @@ def generate_block(
         f"---\n"
         f"# **Card Identifier**\n"
         f"- **Card Name:** {title}\n"
-        f"- **Created Date:** {_fmt_date(created_at)}\n"
-        f"- **Modified Date:** {_fmt_date(content_modified_at)}\n"
-        f"- **Last Activity:** {_fmt_date(last_activity)}\n"
+        f"- **Created Date:** {fmt_date(created_at)}\n"
+        f"- **Modified Date:** {fmt_date(content_modified_at)}\n"
+        f"- **Last Activity:** {fmt_date(last_activity)}\n"
         f"- **Unique ID:** {uid6}\n"
         f"---"
     )

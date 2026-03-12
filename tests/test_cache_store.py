@@ -56,6 +56,54 @@ class TestCardSerialization:
         assert restored.description == ""
 
 
+class TestDescriptionBoundaryHardening:
+    """F-009: description parsing with HTML comment markers."""
+
+    def test_description_with_checklist_heading(self, sample_card: Card) -> None:
+        """Description containing '# Checklist Summary' should not be truncated."""
+        sample_card.description = (
+            "My description\n\n# Checklist Summary\n\nThis is part of the desc."
+        )
+        md = card_to_markdown(sample_card)
+        restored = markdown_to_card(md)
+        assert restored.description == sample_card.description
+
+    def test_backward_compat_old_format_read(self) -> None:
+        """Old heading-based format (no HTML comments) should still parse correctly."""
+        old_format = (
+            "---\n"
+            "card_id: abc123\n"
+            "uid6: BC1234\n"
+            "board_id: board1\n"
+            "list_id: list1\n"
+            "title: Test\n"
+            "created_at: null\n"
+            "content_modified_at: null\n"
+            "last_activity: null\n"
+            "due: null\n"
+            "labels: []\n"
+            "members: []\n"
+            "closed: false\n"
+            "dirty: false\n"
+            "---\n"
+            "\n"
+            "[TRACHE CARD IDENTITY]\n"
+            "- **Card Name:** Test\n"
+            "\n"
+            "---\n"
+            "\n"
+            "# Description\n"
+            "\n"
+            "Old style description.\n"
+            "\n"
+            "# Checklist Summary\n"
+            "\n"
+            "- MVP: 1/3 complete\n"
+        )
+        card = markdown_to_card(old_format)
+        assert card.description == "Old style description."
+
+
 class TestFileOperations:
     def test_write_and_read(self, sample_card: Card, cache_dir) -> None:
         cards_dir = cache_dir / "working" / "cards"

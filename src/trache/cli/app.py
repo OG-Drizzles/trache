@@ -89,6 +89,7 @@ def pull(
     list_name: Optional[str] = typer.Option(
         None, "--list", "-l", help="Pull all cards in list (ID or name)"
     ),
+    force: bool = typer.Option(False, "--force", help="Overwrite dirty working state"),
 ) -> None:
     """Pull data from Trello into local cache."""
     from trache.sync.pull import pull_card, pull_full_board, pull_list
@@ -96,16 +97,20 @@ def pull(
     client, config = _get_client()
     cache_dir = Path(".trache")
 
-    with client:
-        if card:
-            result = pull_card(card, config, client, cache_dir)
-            console.print(f"[green]Pulled card: {result.title} [{result.uid6}][/green]")
-        elif list_name:
-            cards = pull_list(list_name, config, client, cache_dir)
-            console.print(f"[green]Pulled {len(cards)} cards from list[/green]")
-        else:
-            count = pull_full_board(config, client, cache_dir)
-            console.print(f"[green]Pulled {count} cards[/green]")
+    try:
+        with client:
+            if card:
+                result = pull_card(card, config, client, cache_dir, force=force)
+                console.print(f"[green]Pulled card: {result.title} [{result.uid6}][/green]")
+            elif list_name:
+                cards = pull_list(list_name, config, client, cache_dir, force=force)
+                console.print(f"[green]Pulled {len(cards)} cards from list[/green]")
+            else:
+                count = pull_full_board(config, client, cache_dir, force=force)
+                console.print(f"[green]Pulled {count} cards[/green]")
+    except RuntimeError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -202,10 +207,14 @@ def sync(
             if result.errors:
                 for err in result.errors:
                     console.print(f"[red]Error: {err}[/red]")
+                console.print(
+                    "[red]Push had errors — skipping full pull to preserve local state[/red]"
+                )
+                raise typer.Exit(1)
 
-        # Then pull
+        # Only full pull if no errors
         if not dry_run:
-            count = pull_full_board(config, client, cache_dir)
+            count = pull_full_board(config, client, cache_dir, force=True)
             console.print(f"[green]Pulled {count} cards[/green]")
         else:
             console.print("[yellow]Dry run — skipping pull[/yellow]")

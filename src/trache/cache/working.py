@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from trache.cache.index import resolve_card_id, resolve_list_id
+from trache.cache.index import add_card_to_index, resolve_card_id, resolve_list_id
 from trache.cache.models import Card
 from trache.cache.store import list_card_files, read_card_file, write_card_file
 
@@ -63,6 +63,7 @@ def move_card(identifier: str, list_identifier: str, cache_dir: Path) -> Card:
     card.content_modified_at = _now()
     card.dirty = True
     write_card_file(card, _working_dir(cache_dir))
+    add_card_to_index(card, _index_dir(cache_dir))
     return card
 
 
@@ -91,6 +92,8 @@ def create_card(
         dirty=True,
     )
     write_card_file(card, _working_dir(cache_dir))
+    # Update discovery index so temp card is immediately resolvable
+    add_card_to_index(card, _index_dir(cache_dir))
     return card
 
 

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
 from trache.api.client import TrelloClient
-from trache.cache.diff import CardChange, Changeset, compute_diff
+from trache.cache.diff import CardChange, Changeset, ChecklistChange, compute_diff
 from trache.cache.store import read_card_file
 from trache.config import TracheConfig
 from trache.identity import generate_block, inject_block
@@ -87,7 +88,7 @@ def push_changes(
     if not dry_run:
         for card_id in result.pushed:
             try:
-                pull_card(card_id, config, client, cache_dir)
+                pull_card(card_id, config, client, cache_dir, force=True)
             except Exception:
                 pass  # Best effort re-pull
 
@@ -129,6 +130,10 @@ def _push_modified_card(
     if "due" in change.field_changes:
         update_fields["due"] = card.due.isoformat() if card.due else None
 
+    if "labels" in change.field_changes:
+        label_ids = _resolve_label_ids(card.labels, cache_dir)
+        update_fields["idLabels"] = ",".join(label_ids)
+
     if update_fields:
         # Always ensure description has identifier block
         if "desc" not in update_fields:
@@ -143,6 +148,10 @@ def _push_modified_card(
 
         client.update_card(change.card_id, update_fields)
 
+    # Push checklist changes
+    if change.checklist_changes:
+        _push_checklist_changes(change.card_id, change.checklist_changes, client, cache_dir)
+
 
 def _push_new_card(
     change: CardChange,
@@ -153,7 +162,18 @@ def _push_new_card(
 ) -> None:
     """Create a new card on Trello."""
     card = read_card_file(working_dir / f"{change.card_id}.md")
-    new_card = client.create_card(card.list_id, card.title, card.description)
+
+    # Inject identifier block (same contract as modified cards)
+    block = generate_block(
+        title=card.title,
+        created_at=card.created_at,
+        content_modified_at=card.content_modified_at,
+        last_activity=card.last_activity,
+        uid6=card.uid6,
+    )
+    desc_with_block = inject_block(card.description, block)
+
+    new_card = client.create_card(card.list_id, card.title, desc_with_block)
 
     # Clean up temp file and re-pull the real card
     temp_file = working_dir / f"{change.card_id}.md"
@@ -161,7 +181,67 @@ def _push_new_card(
     clean_file = cache_dir / "clean" / "cards" / f"{change.card_id}.md"
     clean_file.unlink(missing_ok=True)
 
-    pull_card(new_card.id, config, client, cache_dir)
+    pull_card(new_card.id, config, client, cache_dir, force=True)
+
+
+def _push_checklist_changes(
+    card_id: str,
+    changes: list[ChecklistChange],
+    client: TrelloClient,
+    cache_dir: Path,
+) -> None:
+    """Push checklist changes to Trello API."""
+    for cl_change in changes:
+        if cl_change.change_type == "state_change":
+            client.update_checklist_item(card_id, cl_change.item_id, cl_change.new_value)
+        elif cl_change.change_type == "new_item":
+            client.add_checklist_item(cl_change.checklist_id, cl_change.new_value)
+        elif cl_change.change_type == "removed_item":
+            client.delete_checklist_item(cl_change.checklist_id, cl_change.item_id)
+        elif cl_change.change_type == "text_change":
+            client.update_checklist_item_name(card_id, cl_change.item_id, cl_change.new_value)
+
+
+def _resolve_label_ids(label_names: list[str], cache_dir: Path) -> list[str]:
+    """Resolve label names to Trello IDs. Raises on unresolvable labels."""
+
+    labels_path = cache_dir / "working" / "labels.json"
+    if not labels_path.exists():
+        raise ValueError(
+            "Cannot push labels: labels.json not found in cache. Run 'trache pull' first."
+        )
+
+    labels_data = json.loads(labels_path.read_text())
+
+    # Build name→ID mapping
+    name_to_id: dict[str, str] = {}
+    color_to_ids: dict[str, list[str]] = {}
+    for lb in labels_data:
+        if lb.get("name"):
+            name_to_id[lb["name"]] = lb["id"]
+        if lb.get("color"):
+            color_to_ids.setdefault(lb["color"], []).append(lb["id"])
+
+    resolved: list[str] = []
+    for label in label_names:
+        if label in name_to_id:
+            resolved.append(name_to_id[label])
+        elif label in color_to_ids:
+            ids = color_to_ids[label]
+            if len(ids) == 1:
+                resolved.append(ids[0])
+            else:
+                raise ValueError(
+                    f"Ambiguous label '{label}': color matches {len(ids)} labels. "
+                    f"Use label names instead of colours."
+                )
+        else:
+            raise ValueError(
+                f"Cannot resolve label '{label}' to a Trello label ID. "
+                f"Known labels: {list(name_to_id.keys())}. "
+                f"Run 'trache pull' to refresh label data."
+            )
+    return resolved
 
 
 def _matches_filter(card_id: str, filter_str: str, cache_dir: Path) -> bool:

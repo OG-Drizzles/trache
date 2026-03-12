@@ -7,19 +7,34 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from trache.api.client import TrelloClient
-from trache.cache.index import build_card_indexes, build_list_index
+from trache.cache.index import build_card_indexes, build_index
 from trache.cache.models import Card, Checklist
 from trache.cache.snapshot import write_clean_snapshot
-from trache.cache.store import write_card_file
+from trache.cache.store import read_card_file, write_card_file
 from trache.config import SyncState, TracheConfig
 from trache.identity import strip_block
 
 
-def pull_full_board(config: TracheConfig, client: TrelloClient, cache_dir: Path) -> int:
+def _check_dirty_state(cache_dir: Path, force: bool) -> None:
+    """Refuse to overwrite dirty working state unless force=True."""
+    from trache.cache.diff import compute_diff
+
+    changeset = compute_diff(cache_dir)
+    if not changeset.is_empty and not force:
+        raise RuntimeError(
+            "Working copy has unpushed changes. Push first or pass force=True."
+        )
+
+
+def pull_full_board(
+    config: TracheConfig, client: TrelloClient, cache_dir: Path, *, force: bool = False
+) -> int:
     """Pull entire board: lists, cards, checklists → clean + working + indexes.
 
     Returns the number of cards pulled.
+    Raises RuntimeError if working copy has unpushed changes and force=False.
     """
+    _check_dirty_state(cache_dir, force)
     board_id = config.board_id
 
     # Fetch all data
@@ -36,6 +51,11 @@ def pull_full_board(config: TracheConfig, client: TrelloClient, cache_dir: Path)
     # Attach checklists to cards
     _attach_checklists(cards, checklists)
 
+    # Preserve content_modified_at for unchanged content
+    clean_cards_dir = cache_dir / "clean" / "cards"
+    for card in cards:
+        _preserve_content_modified_at(card, clean_cards_dir)
+
     # Write board metadata
     board_meta = f"# {board.name}\n\n- **Board ID:** {board.id}\n- **URL:** {board.url}\n"
     (cache_dir / "clean" / "board_meta.md").write_text(board_meta)
@@ -47,12 +67,15 @@ def pull_full_board(config: TracheConfig, client: TrelloClient, cache_dir: Path)
     (cache_dir / "clean" / "labels.json").write_text(labels_json)
     (cache_dir / "working" / "labels.json").write_text(labels_json)
 
-    # Write checklists
-    checklist_dir = cache_dir / "checklists"
-    checklist_dir.mkdir(parents=True, exist_ok=True)
-    for cl in checklists:
-        cl_path = checklist_dir / f"{cl.id}.json"
-        cl_path.write_text(cl.model_dump_json(indent=2) + "\n")
+    # Write per-card checklist files to clean/working
+    _write_per_card_checklists(checklists, cache_dir)
+
+    # Clean up old checklists/ dir (migration from pre-0.1.1)
+    old_cl_dir = cache_dir / "checklists"
+    if old_cl_dir.exists():
+        import shutil
+
+        shutil.rmtree(old_cl_dir)
 
     # Write clean snapshot
     write_clean_snapshot(cards, cache_dir)
@@ -66,10 +89,9 @@ def pull_full_board(config: TracheConfig, client: TrelloClient, cache_dir: Path)
     for card in cards:
         write_card_file(card, working_dir)
 
-    # Build indexes
+    # Build unified index
     index_dir = cache_dir / "indexes"
-    build_card_indexes(cards, index_dir)
-    build_list_index(lists, index_dir)
+    build_index(cards, lists, index_dir)
 
     # Update sync state
     state = SyncState(
@@ -89,8 +111,14 @@ def pull_card(
     config: TracheConfig,
     client: TrelloClient,
     cache_dir: Path,
+    *,
+    force: bool = False,
 ) -> Card:
-    """Pull a single card by ID."""
+    """Pull a single card by ID.
+
+    Raises RuntimeError if working copy has unpushed changes and force=False.
+    """
+    _check_dirty_state(cache_dir, force)
     from trache.cache.index import resolve_card_id
 
     card_id = resolve_card_id(card_identifier, cache_dir / "indexes")
@@ -101,14 +129,15 @@ def pull_card(
     checklists = client.get_card_checklists(card_id)
     card.checklists = checklists
 
+    # Preserve content_modified_at for unchanged content
+    _preserve_content_modified_at(card, cache_dir / "clean" / "cards")
+
     # Write to clean and working
     write_card_file(card, cache_dir / "clean" / "cards")
     write_card_file(card, cache_dir / "working" / "cards")
 
-    # Write checklists
-    for cl in checklists:
-        cl_path = cache_dir / "checklists" / f"{cl.id}.json"
-        cl_path.write_text(cl.model_dump_json(indent=2) + "\n")
+    # Write per-card checklist files
+    _write_per_card_checklists(checklists, cache_dir)
 
     # Rebuild indexes (incremental would be better but full rebuild is safe)
     from trache.cache.store import list_card_files, read_card_file
@@ -124,8 +153,14 @@ def pull_list(
     config: TracheConfig,
     client: TrelloClient,
     cache_dir: Path,
+    *,
+    force: bool = False,
 ) -> list[Card]:
-    """Pull all cards in a specific list."""
+    """Pull all cards in a specific list.
+
+    Raises RuntimeError if working copy has unpushed changes and force=False.
+    """
+    _check_dirty_state(cache_dir, force)
     from trache.cache.index import resolve_list_id
 
     list_id = resolve_list_id(list_identifier, cache_dir / "indexes")
@@ -136,12 +171,14 @@ def pull_list(
         checklists = client.get_card_checklists(card.id)
         card.checklists = checklists
 
+        # Preserve content_modified_at for unchanged content
+        _preserve_content_modified_at(card, cache_dir / "clean" / "cards")
+
         write_card_file(card, cache_dir / "clean" / "cards")
         write_card_file(card, cache_dir / "working" / "cards")
 
-        for cl in checklists:
-            cl_path = cache_dir / "checklists" / f"{cl.id}.json"
-            cl_path.write_text(cl.model_dump_json(indent=2) + "\n")
+        # Write per-card checklist files
+        _write_per_card_checklists(checklists, cache_dir)
 
     # Rebuild indexes
     from trache.cache.store import list_card_files, read_card_file
@@ -150,6 +187,55 @@ def pull_list(
     build_card_indexes(all_cards, cache_dir / "indexes")
 
     return cards
+
+
+def _write_per_card_checklists(checklists: list[Checklist], cache_dir: Path) -> None:
+    """Write per-card checklist JSON files to clean and working directories."""
+    checklists_by_card: dict[str, list[Checklist]] = {}
+    for cl in checklists:
+        checklists_by_card.setdefault(cl.card_id, []).append(cl)
+
+    for card_id, card_cls in checklists_by_card.items():
+        cl_data = [cl.model_dump() for cl in card_cls]
+        cl_json = json.dumps(cl_data, indent=2, default=str) + "\n"
+        clean_cl_dir = cache_dir / "clean" / "checklists"
+        working_cl_dir = cache_dir / "working" / "checklists"
+        clean_cl_dir.mkdir(parents=True, exist_ok=True)
+        working_cl_dir.mkdir(parents=True, exist_ok=True)
+        (clean_cl_dir / f"{card_id}.json").write_text(cl_json)
+        (working_cl_dir / f"{card_id}.json").write_text(cl_json)
+
+
+_CONTENT_FIELDS = ("title", "description", "list_id", "labels", "due", "closed")
+
+
+def _preserve_content_modified_at(new_card: Card, clean_dir: Path) -> None:
+    """Preserve content_modified_at if content hasn't changed vs clean snapshot."""
+    clean_path = clean_dir / f"{new_card.id}.md"
+    if not clean_path.exists():
+        return  # First pull — keep dateLastActivity as default
+
+    old_card = read_card_file(clean_path)
+    content_changed = any(
+        getattr(new_card, f) != getattr(old_card, f) for f in _CONTENT_FIELDS
+    )
+
+    # Also compare checklists if present
+    if not content_changed and new_card.checklists:
+        old_items = {
+            (item.id, item.name, item.state)
+            for cl in old_card.checklists
+            for item in cl.items
+        }
+        new_items = {
+            (item.id, item.name, item.state)
+            for cl in new_card.checklists
+            for item in cl.items
+        }
+        content_changed = old_items != new_items
+
+    if not content_changed:
+        new_card.content_modified_at = old_card.content_modified_at
 
 
 def _attach_checklists(cards: list[Card], checklists: list[Checklist]) -> None:

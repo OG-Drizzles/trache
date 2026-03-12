@@ -162,6 +162,24 @@ class TrelloClient:
             {"state": state},
         )
 
+    def update_checklist_item_name(
+        self, card_id: str, check_item_id: str, name: str
+    ) -> None:
+        """Update a checklist item's name."""
+        self._put(
+            f"/cards/{card_id}/checkItem/{check_item_id}",
+            {"name": name},
+        )
+
+    def delete_checklist_item(self, checklist_id: str, check_item_id: str) -> None:
+        """Delete a checklist item."""
+        params = self._auth.query_params
+        resp = self._client.delete(
+            f"/checklists/{checklist_id}/checkItems/{check_item_id}",
+            params=params,
+        )
+        resp.raise_for_status()
+
     def add_checklist_item(self, checklist_id: str, name: str) -> ChecklistItem:
         data = self._post(f"/checklists/{checklist_id}/checkItems", {"name": name})
         return ChecklistItem(

@@ -51,10 +51,8 @@ class TestPullFullBoard:
         working_file = cache_dir / "working" / "cards" / "67abc123def4567890fedcba.md"
         assert working_file.exists()
 
-        # Check indexes exist
-        assert (cache_dir / "indexes" / "cards_by_id.json").exists()
-        assert (cache_dir / "indexes" / "cards_by_uid6.json").exists()
-        assert (cache_dir / "indexes" / "lists_by_id.json").exists()
+        # Check unified index exists
+        assert (cache_dir / "indexes" / "index.json").exists()
 
         # Check state file
         assert (cache_dir / "state.json").exists()

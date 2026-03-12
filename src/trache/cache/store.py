@@ -14,6 +14,12 @@ from trache.cache.models import Card
 def _fmt_dt(dt: Optional[datetime]) -> Optional[str]:
     if dt is None:
         return None
+    if dt.tzinfo is not None and dt.utcoffset() is not None:
+        from datetime import timezone
+
+        assert dt.tzinfo == timezone.utc or dt.utcoffset().total_seconds() == 0, (
+            f"Expected UTC datetime, got tzinfo={dt.tzinfo}"
+        )
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
@@ -43,20 +49,21 @@ def card_to_markdown(card: Card) -> str:
 
     fm_str = yaml.dump(frontmatter, default_flow_style=False, sort_keys=False).rstrip()
 
-    from trache.identity import _fmt_date
+    from trache.identity import fmt_date
 
     identity_lines = [
         "[TRACHE CARD IDENTITY]",
         f"- **Card Name:** {card.title}",
-        f"- **Created Date:** {_fmt_date(card.created_at)}",
-        f"- **Modified Date:** {_fmt_date(card.content_modified_at)}",
-        f"- **Last Activity:** {_fmt_date(card.last_activity)}",
+        f"- **Created Date:** {fmt_date(card.created_at)}",
+        f"- **Modified Date:** {fmt_date(card.content_modified_at)}",
+        f"- **Last Activity:** {fmt_date(card.last_activity)}",
         f"- **Unique ID:** {card.uid6}",
     ]
 
     sections = [
         f"---\n{fm_str}\n---", "", "\n".join(identity_lines),
-        "", "---", "", "# Description", "",
+        "", "---", "",
+        "<!-- trache:description -->", "# Description", "",
     ]
 
     if card.description:
@@ -66,6 +73,7 @@ def card_to_markdown(card: Card) -> str:
 
     if card.checklists:
         sections.append("")
+        sections.append("<!-- trache:checklists -->")
         sections.append("# Checklist Summary")
         sections.append("")
         for cl in card.checklists:
@@ -113,11 +121,33 @@ def markdown_to_card(content: str) -> Card:
 
 
 def _extract_description(body: str) -> str:
-    """Extract just the description from the body, skipping identity block and checklist summary."""
+    """Extract just the description from the body, skipping identity block and checklist summary.
+
+    Supports two formats:
+    - New: HTML comment markers (<!-- trache:description -->, <!-- trache:checklists -->)
+    - Old: heading-based (# Description, # Checklist Summary) for backward compatibility
+    """
     lines = body.split("\n")
+
+    # Try marker-based parsing first (new format)
+    desc_start = None
+    desc_end = None
+    for i, line in enumerate(lines):
+        if line.strip() == "<!-- trache:description -->":
+            desc_start = i + 1
+            # Skip the "# Description" heading if it follows the marker
+            if desc_start < len(lines) and lines[desc_start].strip() == "# Description":
+                desc_start += 1
+        elif line.strip() == "<!-- trache:checklists -->":
+            desc_end = i
+
+    if desc_start is not None:
+        end = desc_end if desc_end is not None else len(lines)
+        return "\n".join(lines[desc_start:end]).strip()
+
+    # Fallback: heading-based parsing (old format)
     in_description = False
     desc_lines: list[str] = []
-
     for line in lines:
         if line.strip() == "# Description":
             in_description = True
@@ -127,9 +157,7 @@ def _extract_description(body: str) -> str:
                 break
             desc_lines.append(line)
 
-    # Strip leading/trailing blank lines
-    result = "\n".join(desc_lines).strip()
-    return result
+    return "\n".join(desc_lines).strip()
 
 
 def write_card_file(card: Card, directory: Path) -> Path:
