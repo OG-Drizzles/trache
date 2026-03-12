@@ -89,8 +89,8 @@ def push_changes(
         for card_id in result.pushed:
             try:
                 pull_card(card_id, config, client, cache_dir, force=True)
-            except Exception:
-                pass  # Best effort re-pull
+            except Exception as e:
+                result.errors.append(f"Re-pull failed for {card_id}: {e}")
 
     return changeset, result
 
@@ -135,7 +135,7 @@ def _push_modified_card(
         update_fields["idLabels"] = ",".join(label_ids)
 
     if update_fields:
-        # Always ensure description has identifier block
+        # Only inject description if the rendered output actually changed
         if "desc" not in update_fields:
             block = generate_block(
                 title=card.title,
@@ -144,7 +144,23 @@ def _push_modified_card(
                 last_activity=card.last_activity,
                 uid6=card.uid6,
             )
-            update_fields["desc"] = inject_block(card.description, block)
+            new_rendered = inject_block(card.description, block)
+
+            # Compare against clean card's rendered description
+            clean_card = read_card_file(
+                cache_dir / "clean" / "cards" / f"{change.card_id}.md"
+            )
+            clean_block = generate_block(
+                title=clean_card.title,
+                created_at=clean_card.created_at,
+                content_modified_at=clean_card.content_modified_at,
+                last_activity=clean_card.last_activity,
+                uid6=clean_card.uid6,
+            )
+            old_rendered = inject_block(clean_card.description, clean_block)
+
+            if new_rendered != old_rendered:
+                update_fields["desc"] = new_rendered
 
         client.update_card(change.card_id, update_fields)
 

@@ -55,11 +55,7 @@ def build_index(
 
 # Keep old entry points as aliases for backward compatibility during transition
 def build_card_indexes(cards: list[Card], index_dir: Path) -> None:
-    """Build card indexes. Delegates to build_index with empty lists."""
-    # Load existing lists from index if available, otherwise empty
-    existing = _load_full_index(index_dir)
-    lists_by_id = existing.get("lists_by_id", {})
-
+    """Rebuild card sections of the unified index, preserving lists_by_id."""
     index_dir.mkdir(parents=True, exist_ok=True)
     index = _load_full_index(index_dir)
 
@@ -79,10 +75,6 @@ def build_card_indexes(cards: list[Card], index_dir: Path) -> None:
         }
         index["cards_by_uid6"][card.uid6] = card.id
         index["cards_by_list"].setdefault(card.list_id, []).append(card.id)
-
-    # Preserve existing lists_by_id
-    if "lists_by_id" not in index:
-        index["lists_by_id"] = lists_by_id
 
     _write_json(index_dir / INDEX_FILENAME, index)
 

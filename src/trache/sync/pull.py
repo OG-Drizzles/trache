@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from trache.api.client import TrelloClient
+from trache.cache.diff import _fields_equal
 from trache.cache.index import build_card_indexes, build_index
 from trache.cache.models import Card, Checklist
 from trache.cache.snapshot import write_clean_snapshot
@@ -217,7 +218,8 @@ def _preserve_content_modified_at(new_card: Card, clean_dir: Path) -> None:
 
     old_card = read_card_file(clean_path)
     content_changed = any(
-        getattr(new_card, f) != getattr(old_card, f) for f in _CONTENT_FIELDS
+        not _fields_equal(f, getattr(old_card, f), getattr(new_card, f))
+        for f in _CONTENT_FIELDS
     )
 
     # Also compare checklists if present
