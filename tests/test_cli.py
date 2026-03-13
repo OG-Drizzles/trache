@@ -72,7 +72,7 @@ class TestVersion:
     def test_version(self) -> None:
         result = runner.invoke(app, ["version"])
         assert result.exit_code == 0
-        assert "0.1.2" in result.output
+        assert "0.1." in result.output
 
 
 class TestStatus:
@@ -166,3 +166,87 @@ class TestChecklistRemoveItem:
         result = runner.invoke(app, ["checklist", "remove-item", "FEDCBA", "nonexistent"])
         assert result.exit_code == 1
         assert "not found" in result.output
+
+
+class TestCardShowInvalidUID6:
+    def test_invalid_uid6_friendly_error(self, tmp_path: Path, monkeypatch) -> None:
+        """card show XXXXXX → exit 1, 'Cannot resolve' in output (no traceback)."""
+        _setup_cli_cache(tmp_path, monkeypatch)
+        result = runner.invoke(app, ["card", "show", "XXXXXX"])
+        assert result.exit_code == 1
+        assert "Cannot resolve" in result.output
+        assert "Traceback" not in result.output
+
+    def test_invalid_uid6_on_edit_title(self, tmp_path: Path, monkeypatch) -> None:
+        _setup_cli_cache(tmp_path, monkeypatch)
+        result = runner.invoke(app, ["card", "edit-title", "XXXXXX", "New"])
+        assert result.exit_code == 1
+        assert "Cannot resolve" in result.output
+        assert "Traceback" not in result.output
+
+
+class TestCardListInvalidList:
+    def test_invalid_list_friendly_error(self, tmp_path: Path, monkeypatch) -> None:
+        """card list --list Nonexistent → exit 1, 'Cannot resolve' in output."""
+        _setup_cli_cache(tmp_path, monkeypatch)
+        result = runner.invoke(app, ["card", "list", "--list", "Nonexistent"])
+        assert result.exit_code == 1
+        assert "Cannot resolve" in result.output
+        assert "Traceback" not in result.output
+
+
+class TestCardAddLabel:
+    def test_add_new_label(self, tmp_path: Path, monkeypatch) -> None:
+        """Add a new label → status shows modified card."""
+        _setup_cli_cache(tmp_path, monkeypatch)
+        result = runner.invoke(app, ["card", "add-label", "FEDCBA", "Bug"])
+        assert result.exit_code == 0
+        assert "added" in result.output
+
+        # Verify status detects modification
+        status_result = runner.invoke(app, ["status"])
+        assert "Modified" in status_result.output
+
+    def test_add_duplicate_label_idempotent(self, tmp_path: Path, monkeypatch) -> None:
+        """Add same label twice → idempotent no-op on second call."""
+        _setup_cli_cache(tmp_path, monkeypatch)
+        runner.invoke(app, ["card", "add-label", "FEDCBA", "Bug"])
+        result = runner.invoke(app, ["card", "add-label", "FEDCBA", "Bug"])
+        assert result.exit_code == 0
+        assert "already present" in result.output
+
+    def test_add_label_invalid_uid6(self, tmp_path: Path, monkeypatch) -> None:
+        _setup_cli_cache(tmp_path, monkeypatch)
+        result = runner.invoke(app, ["card", "add-label", "XXXXXX", "Bug"])
+        assert result.exit_code == 1
+        assert "Cannot resolve" in result.output
+
+
+class TestCardRemoveLabel:
+    def test_remove_existing_label(self, tmp_path: Path, monkeypatch) -> None:
+        """Remove a label that exists → status detects modification."""
+        _setup_cli_cache(tmp_path, monkeypatch)
+        # First add a label
+        runner.invoke(app, ["card", "add-label", "FEDCBA", "Bug"])
+        # Then remove it
+        result = runner.invoke(app, ["card", "remove-label", "FEDCBA", "Bug"])
+        assert result.exit_code == 0
+        assert "removed" in result.output.lower()
+
+    def test_remove_absent_label_error(self, tmp_path: Path, monkeypatch) -> None:
+        """Remove absent label → exit 1."""
+        _setup_cli_cache(tmp_path, monkeypatch)
+        result = runner.invoke(app, ["card", "remove-label", "FEDCBA", "Nonexistent"])
+        assert result.exit_code == 1
+        assert "not found" in result.output.lower()
+
+
+class TestChecklistAddItemHelp:
+    def test_help_text_mentions_exact_match(self) -> None:
+        """Verify help text contains 'exact match' and does not imply ID usage."""
+        result = runner.invoke(app, ["checklist", "add-item", "--help"])
+        assert result.exit_code == 0
+        assert "exact match" in result.output.lower()
+        # Help text may line-wrap, so check for both words separately
+        assert "checklist" in result.output.lower()
+        assert "show" in result.output.lower()

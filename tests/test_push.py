@@ -81,3 +81,112 @@ class TestPushChanges:
 
         assert len(result.created) == 1
         client.create_card.assert_called_once()
+
+
+class TestPushFailurePreservation:
+    """Verify that push failures do not destroy local working state."""
+
+    def _setup_cache(self, tmp_path: Path) -> tuple[Path, TracheConfig]:
+        cache_dir = tmp_path / ".trache"
+        ensure_cache_structure(cache_dir)
+        config = TracheConfig(board_id="board1")
+        config.save(cache_dir)
+        return cache_dir, config
+
+    def test_api_failure_preserves_working_copy(
+        self, tmp_path: Path, sample_card: Card
+    ) -> None:
+        """If API update fails, working copy retains local modification."""
+        cache_dir, config = self._setup_cache(tmp_path)
+
+        write_card_file(sample_card, cache_dir / "clean" / "cards")
+        sample_card.title = "My Important Local Edit"
+        write_card_file(sample_card, cache_dir / "working" / "cards")
+
+        # Mock client that raises on update
+        client = MagicMock()
+        client.update_card.side_effect = Exception("API timeout")
+
+        changeset, result = push_changes(config, client, cache_dir)
+
+        assert len(result.errors) == 1
+        assert "API timeout" in result.errors[0]
+
+        # Working copy must still have the local modification
+        from trache.cache.store import read_card_file
+        working = read_card_file(
+            cache_dir / "working" / "cards" / f"{sample_card.id}.md"
+        )
+        assert working.title == "My Important Local Edit"
+
+        # Clean copy should be unchanged (original)
+        clean = read_card_file(
+            cache_dir / "clean" / "cards" / f"{sample_card.id}.md"
+        )
+        assert clean.title == "Test Card"
+
+    def test_no_destructive_side_effects(
+        self, tmp_path: Path, sample_card: Card
+    ) -> None:
+        """Push failure should not delete files or corrupt indexes."""
+        cache_dir, config = self._setup_cache(tmp_path)
+
+        write_card_file(sample_card, cache_dir / "clean" / "cards")
+        sample_card.title = "Changed"
+        write_card_file(sample_card, cache_dir / "working" / "cards")
+
+        client = MagicMock()
+        client.update_card.side_effect = Exception("Network error")
+
+        push_changes(config, client, cache_dir)
+
+        # Both files should still exist
+        assert (cache_dir / "clean" / "cards" / f"{sample_card.id}.md").exists()
+        assert (cache_dir / "working" / "cards" / f"{sample_card.id}.md").exists()
+
+
+class TestStaleStateBehaviour:
+    """Documents current local-wins behaviour on push.
+
+    When a card is modified locally and pushed, the local version wins.
+    This is not conflict resolution — it's last-writer-wins at push time.
+    """
+
+    def _setup_cache(self, tmp_path: Path) -> tuple[Path, TracheConfig]:
+        cache_dir = tmp_path / ".trache"
+        ensure_cache_structure(cache_dir)
+        config = TracheConfig(board_id="board1")
+        config.save(cache_dir)
+        return cache_dir, config
+
+    def test_local_wins_on_push(self, tmp_path: Path, sample_card: Card) -> None:
+        """Documents: local modification pushed → server accepts → re-pull returns our changes."""
+        cache_dir, config = self._setup_cache(tmp_path)
+
+        write_card_file(sample_card, cache_dir / "clean" / "cards")
+        sample_card.title = "Local Wins Title"
+        write_card_file(sample_card, cache_dir / "working" / "cards")
+
+        # Server accepts the push and returns the updated card on re-pull
+        post_push_card = Card(
+            id=sample_card.id,
+            board_id=sample_card.board_id,
+            list_id=sample_card.list_id,
+            title="Local Wins Title",
+        )
+        client = MagicMock()
+        client.update_card.return_value = post_push_card
+        client.get_card.return_value = post_push_card
+        client.get_card_checklists.return_value = []
+
+        changeset, result = push_changes(config, client, cache_dir)
+
+        assert len(result.pushed) == 1
+        assert len(result.errors) == 0
+
+        # After re-pull, working copy has our title
+        from trache.cache.store import read_card_file
+        working = read_card_file(
+            cache_dir / "working" / "cards" / f"{sample_card.id}.md"
+        )
+        assert working.title == "Local Wins Title"

@@ -7,6 +7,8 @@ trache card list                    # One index read → full board orientation
 trache card show <uid6>             # One card file read
 # ... mutate locally ...
 trache card edit-title <uid6> "New"
+trache card add-label <uid6> "Bug"  # Add label locally
+trache card remove-label <uid6> "Bug"  # Remove label locally
 trache checklist check <uid6> <item_id>
 trache status                       # Show dirty state
 trache diff                         # Show detailed changes

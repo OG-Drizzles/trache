@@ -131,3 +131,59 @@ class TestSyncPartialFailure:
 
         assert len(result.pushed) == 1
         assert len(result.errors) == 0
+
+
+class TestSyncHappyPath:
+    """Mock-backed sync (push + pull combo) happy path."""
+
+    def test_sync_push_then_pull(self, tmp_path: Path) -> None:
+        """Sync: dirty state → push succeeds → full pull succeeds → clean state."""
+        cache_dir, config = _setup(tmp_path)
+        lists = [TrelloList(id="list1", name="To Do", board_id="board1", pos=1)]
+
+        # Initial state: card in clean and working with different titles
+        card = Card(
+            id="67abc123def4567890fedcba", board_id="board1",
+            list_id="list1", title="Original",
+        )
+        write_card_file(card, cache_dir / "clean" / "cards")
+        modified = Card(
+            id="67abc123def4567890fedcba", board_id="board1",
+            list_id="list1", title="Updated via sync",
+        )
+        write_card_file(modified, cache_dir / "working" / "cards")
+
+        # Mock client: push succeeds, full pull returns post-push state
+        post_push_card = Card(
+            id="67abc123def4567890fedcba", board_id="board1",
+            list_id="list1", title="Updated via sync",
+        )
+        client = _make_mock_client([post_push_card], lists)
+        client.update_card.return_value = post_push_card
+        client.get_card.return_value = post_push_card
+        client.get_card_checklists.return_value = []
+
+        # Push phase
+        changeset, result = push_changes(config, client, cache_dir)
+        assert len(result.pushed) == 1
+        assert len(result.errors) == 0
+
+        # Pull phase (force=True since push just ran)
+        count = pull_full_board(config, client, cache_dir, force=True)
+        assert count == 1
+
+        # Final state: clean and working should match
+        from trache.cache.store import read_card_file
+        clean = read_card_file(
+            cache_dir / "clean" / "cards" / "67abc123def4567890fedcba.md"
+        )
+        working = read_card_file(
+            cache_dir / "working" / "cards" / "67abc123def4567890fedcba.md"
+        )
+        assert clean.title == "Updated via sync"
+        assert working.title == "Updated via sync"
+
+        # Status should be clean
+        from trache.cache.diff import compute_diff
+        diff = compute_diff(cache_dir)
+        assert diff.is_empty

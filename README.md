@@ -124,10 +124,12 @@ Optimised for Claude Code and similar agents:
 | `trache card move <id> <list>` | Move card to list locally |
 | `trache card create <list> <title>` | Create card locally |
 | `trache card archive <id>` | Archive card locally |
+| `trache card add-label <id> <label>` | Add label to card locally |
+| `trache card remove-label <id> <label>` | Remove label from card locally |
 | `trache checklist show <card>` | Show checklists for card |
 | `trache checklist check <card> <item_id>` | Mark checklist item complete (local) |
 | `trache checklist uncheck <card> <item_id>` | Mark checklist item incomplete (local) |
-| `trache checklist add-item <card> <checklist> <text>` | Add checklist item (local) |
+| `trache checklist add-item <card> <name> <text>` | Add item to checklist by name (local) |
 | `trache checklist remove-item <card> <item_id>` | Remove checklist item (local) |
 | `trache comment add <card> <text>` | Add comment to card |
 | `trache comment list <card>` | List comments on card |
