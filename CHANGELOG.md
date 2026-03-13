@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.5 — 2026-03-13
+
+AI agent onboarding command.
+
+### Features
+
+- **`trache agents` command**: prints a short install block for permanent insertion into CLAUDE.md/AGENTS.md, with `--reference` flag for on-demand command/workflow reference
+- **Init agent guidance**: `trache init` now prints the agent setup block and a human fallback note after initialising
+
+### Housekeeping
+
+- Removed validation report files from project root
+
 ## 0.1.4 — 2026-03-13
 
 Onboarding, documentation, packaging, and Claude skill integration release.
