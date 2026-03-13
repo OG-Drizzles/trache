@@ -301,6 +301,22 @@ class TestAgents:
         assert "local-first" in between.lower()
 
 
+class TestCardCreateTempMarker:
+    def test_create_card_uid6_ends_with_temp_marker(self, tmp_path: Path, monkeypatch) -> None:
+        """Locally created cards should have UID6 ending with 'T~'."""
+        _setup_cli_cache(tmp_path, monkeypatch)
+        result = runner.invoke(app, ["card", "create", "To Do", "My New Card"])
+        assert result.exit_code == 0
+
+        # Find the newly created card file in working/cards
+        working_cards = tmp_path / ".trache" / "working" / "cards"
+        new_files = [f for f in working_cards.glob("*.md") if "new_" in f.stem]
+        assert len(new_files) == 1
+        # The filename stem is the card ID; uid6 = stem[-6:].upper()
+        uid6 = new_files[0].stem[-6:].upper()
+        assert uid6.endswith("T~"), f"Expected UID6 ending with 'T~', got '{uid6}'"
+
+
 class TestChecklistAddItemHelp:
     def test_help_text_mentions_exact_match(self) -> None:
         """Verify help text contains 'exact match' and does not imply ID usage."""

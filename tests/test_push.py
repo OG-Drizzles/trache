@@ -63,8 +63,8 @@ class TestPushChanges:
     def test_push_added_card(self, tmp_path: Path, sample_card: Card) -> None:
         cache_dir, config = self._setup_cache(tmp_path)
 
-        sample_card.id = "new_temp_abc123def456"
-        sample_card.uid6 = "EF4567"  # Reset uid6 manually for temp ID
+        sample_card.id = "new_temp_abc123d4t~"
+        sample_card.uid6 = "3D4T~"  # Reset uid6 manually for temp ID
         write_card_file(sample_card, cache_dir / "working" / "cards")
 
         client = MagicMock()

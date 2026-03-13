@@ -153,7 +153,7 @@ def add_item(
         raise typer.Exit(1)
 
     # Generate temp ID for the new item
-    temp_id = f"temp_{uuid4().hex[:16]}"
+    temp_id = f"temp_{uuid4().hex[:14]}t~"
     max_pos = max((item.get("pos", 0) for item in target_cl.get("items", [])), default=0)
     new_item = {
         "id": temp_id,

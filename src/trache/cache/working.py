@@ -78,7 +78,7 @@ def create_card(
     list_id = resolve_list_id(list_identifier, _index_dir(cache_dir))
 
     # Generate a temporary ID for new cards (will be replaced on push)
-    temp_id = f"new_{uuid4().hex[:18]}"
+    temp_id = f"new_{uuid4().hex[:16]}t~"
 
     card = Card(
         id=temp_id,
