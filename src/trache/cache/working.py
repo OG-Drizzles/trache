@@ -105,3 +105,36 @@ def archive_card(identifier: str, cache_dir: Path) -> Card:
     card.dirty = True
     write_card_file(card, _working_dir(cache_dir))
     return card
+
+
+def add_label(identifier: str, label_name: str, cache_dir: Path) -> tuple[Card, bool]:
+    """Add a label to a card in the working copy. Idempotent.
+
+    Returns (card, added) where added is False if label was already present.
+    """
+    card = read_working_card(identifier, cache_dir)
+    if label_name in card.labels:
+        return card, False
+    card.labels.append(label_name)
+    card.content_modified_at = _now()
+    card.dirty = True
+    write_card_file(card, _working_dir(cache_dir))
+    return card, True
+
+
+def remove_label(identifier: str, label_name: str, cache_dir: Path) -> Card:
+    """Remove a label from a card in the working copy.
+
+    Raises ValueError if the label is not present.
+    """
+    card = read_working_card(identifier, cache_dir)
+    if label_name not in card.labels:
+        raise ValueError(
+            f"Label '{label_name}' not found on card {card.title} [{card.uid6}]. "
+            f"Current labels: {card.labels}"
+        )
+    card.labels.remove(label_name)
+    card.content_modified_at = _now()
+    card.dirty = True
+    write_card_file(card, _working_dir(cache_dir))
+    return card

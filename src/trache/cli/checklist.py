@@ -1,4 +1,4 @@
-"""Checklist subcommands: show, check, uncheck, add-item."""
+"""Checklist subcommands: show, check, uncheck, add-item, remove-item."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ from uuid import uuid4
 
 import typer
 from rich.console import Console
+
+from trache.cli._errors import handle_resolve_errors
 
 checklist_app = typer.Typer(no_args_is_help=True)
 console = Console()
@@ -54,6 +56,7 @@ def _update_card_content_modified_at(card_id: str) -> None:
 
 
 @checklist_app.command("show")
+@handle_resolve_errors
 def show(
     card_identifier: str = typer.Argument(help="Card ID or UID6"),
 ) -> None:
@@ -72,6 +75,7 @@ def show(
 
 
 @checklist_app.command("check")
+@handle_resolve_errors
 def check(
     card_identifier: str = typer.Argument(help="Card ID or UID6"),
     item_id: str = typer.Argument(help="Checklist item ID"),
@@ -99,6 +103,7 @@ def check(
 
 
 @checklist_app.command("uncheck")
+@handle_resolve_errors
 def uncheck(
     card_identifier: str = typer.Argument(help="Card ID or UID6"),
     item_id: str = typer.Argument(help="Checklist item ID"),
@@ -126,12 +131,15 @@ def uncheck(
 
 
 @checklist_app.command("add-item")
+@handle_resolve_errors
 def add_item(
     card_identifier: str = typer.Argument(help="Card ID or UID6"),
-    checklist_name: str = typer.Argument(help="Checklist name"),
+    checklist_name: str = typer.Argument(
+        help="Checklist name (exact match — use 'checklist show' to see names)"
+    ),
     text: str = typer.Argument(help="Item text"),
 ) -> None:
-    """Add an item to a checklist (local-first, push to sync)."""
+    """Add an item to a checklist by name (local-first, push to sync)."""
     card_id, checklists = _load_checklists_for_card(card_identifier)
 
     target_cl = None
@@ -161,6 +169,7 @@ def add_item(
 
 
 @checklist_app.command("remove-item")
+@handle_resolve_errors
 def remove_item(
     card_identifier: str = typer.Argument(help="Card ID or UID6"),
     item_id: str = typer.Argument(help="Checklist item ID"),

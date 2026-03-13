@@ -1,4 +1,4 @@
-"""Card subcommands: list, show, edit-title, edit-desc, move, create, archive."""
+"""Card subcommands: list, show, edit-title, edit-desc, move, create, archive, labels."""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from trache.cli._errors import handle_resolve_errors
+
 card_app = typer.Typer(no_args_is_help=True)
 console = Console()
 
@@ -18,6 +20,7 @@ def _cache_dir() -> Path:
 
 
 @card_app.command("list")
+@handle_resolve_errors
 def list_cards(
     list_name: Optional[str] = typer.Option(
         None, "--list", "-l", help="Filter by list (ID or name)"
@@ -53,6 +56,7 @@ def list_cards(
 
 
 @card_app.command("show")
+@handle_resolve_errors
 def show_card(
     identifier: str = typer.Argument(help="Card ID or UID6"),
 ) -> None:
@@ -80,6 +84,7 @@ def show_card(
 
 
 @card_app.command("edit-title")
+@handle_resolve_errors
 def edit_title(
     identifier: str = typer.Argument(help="Card ID or UID6"),
     title: str = typer.Argument(help="New title"),
@@ -92,6 +97,7 @@ def edit_title(
 
 
 @card_app.command("edit-desc")
+@handle_resolve_errors
 def edit_desc(
     identifier: str = typer.Argument(help="Card ID or UID6"),
     desc: str = typer.Argument(help="New description"),
@@ -104,6 +110,7 @@ def edit_desc(
 
 
 @card_app.command("move")
+@handle_resolve_errors
 def move(
     identifier: str = typer.Argument(help="Card ID or UID6"),
     list_target: str = typer.Argument(help="Target list (ID or name)"),
@@ -116,6 +123,7 @@ def move(
 
 
 @card_app.command("create")
+@handle_resolve_errors
 def create(
     list_target: str = typer.Argument(help="Target list (ID or name)"),
     title: str = typer.Argument(help="Card title"),
@@ -131,6 +139,7 @@ def create(
 
 
 @card_app.command("archive")
+@handle_resolve_errors
 def archive(
     identifier: str = typer.Argument(help="Card ID or UID6"),
 ) -> None:
@@ -141,3 +150,38 @@ def archive(
     console.print(
         f"[yellow]Archived: {card.title} [{card.uid6}] (local only — push to sync)[/yellow]"
     )
+
+
+@card_app.command("add-label")
+@handle_resolve_errors
+def add_label_cmd(
+    identifier: str = typer.Argument(help="Card ID or UID6"),
+    label: str = typer.Argument(help="Label name to add"),
+) -> None:
+    """Add a label to a card in working copy."""
+    from trache.cache.working import add_label
+
+    card, added = add_label(identifier, label, _cache_dir())
+    if added:
+        console.print(f"[green]Label '{label}' added to {card.title} [{card.uid6}][/green]")
+    else:
+        console.print(f"Label '{label}' already present on {card.title} [{card.uid6}]")
+
+
+@card_app.command("remove-label")
+@handle_resolve_errors
+def remove_label_cmd(
+    identifier: str = typer.Argument(help="Card ID or UID6"),
+    label: str = typer.Argument(help="Label name to remove"),
+) -> None:
+    """Remove a label from a card in working copy."""
+    from trache.cache.working import remove_label
+
+    try:
+        card = remove_label(identifier, label, _cache_dir())
+        console.print(
+            f"[green]Label '{label}' removed from {card.title} [{card.uid6}][/green]"
+        )
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)

@@ -111,6 +111,10 @@ def pull(
     except RuntimeError as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(1)
+    except KeyError as e:
+        msg = e.args[0] if e.args else "Requested item not found"
+        console.print(f"[red]{msg}[/red]")
+        raise typer.Exit(1)
 
 
 @app.command()

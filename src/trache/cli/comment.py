@@ -7,6 +7,8 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
+from trache.cli._errors import handle_resolve_errors
+
 comment_app = typer.Typer(no_args_is_help=True)
 console = Console()
 
@@ -16,6 +18,7 @@ def _cache_dir() -> Path:
 
 
 @comment_app.command("add")
+@handle_resolve_errors
 def add(
     card_identifier: str = typer.Argument(help="Card ID or UID6"),
     text: str = typer.Argument(help="Comment text"),
@@ -37,6 +40,7 @@ def add(
 
 
 @comment_app.command("list")
+@handle_resolve_errors
 def list_comments(
     card_identifier: str = typer.Argument(help="Card ID or UID6"),
 ) -> None:
