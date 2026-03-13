@@ -241,6 +241,66 @@ class TestCardRemoveLabel:
         assert "not found" in result.output.lower()
 
 
+class TestAgents:
+    def test_agents_prints_install_block(self) -> None:
+        result = runner.invoke(app, ["agents"])
+        assert result.exit_code == 0
+        assert "local-first" in result.output.lower()
+        assert "targeted" in result.output.lower()
+        assert ".trache/" in result.output
+        assert "trache agents --reference" in result.output
+
+    def test_agents_contains_permission_prompt(self) -> None:
+        result = runner.invoke(app, ["agents"])
+        assert result.exit_code == 0
+        output_lower = result.output.lower()
+        assert "ask" in output_lower
+        assert "permission" in output_lower
+
+    def test_agents_reference_prints_reference(self) -> None:
+        result = runner.invoke(app, ["agents", "--reference"])
+        assert result.exit_code == 0
+        assert "UID6" in result.output
+        assert "trache card list" in result.output
+        assert "trache push" in result.output
+
+    def test_default_does_not_contain_reference_content(self) -> None:
+        result = runner.invoke(app, ["agents"])
+        assert result.exit_code == 0
+        # UID6 explanation is reference-only content
+        assert "Last 6 characters of a Trello card ID" not in result.output
+
+    def test_reference_does_not_contain_preamble(self) -> None:
+        result = runner.invoke(app, ["agents", "--reference"])
+        assert result.exit_code == 0
+        assert "copy below this line" not in result.output
+        assert "Agent setup block" not in result.output
+
+    def test_init_prints_agent_guidance(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("TRELLO_API_KEY", "test_key")
+        monkeypatch.setenv("TRELLO_TOKEN", "test_token")
+
+        result = runner.invoke(app, ["init", "--board-id", "abc123def456789012345678"])
+        output = result.output
+        # Install block content
+        assert "local-first" in output.lower()
+        assert "trache agents --reference" in output
+        # Human fallback note
+        assert "setting this up manually" in output.lower()
+
+    def test_preamble_and_human_note_outside_copy_block(self) -> None:
+        result = runner.invoke(app, ["agents"])
+        output = result.output
+        copy_start = output.index("copy below this line")
+        copy_end = output.index("copy above this line")
+        # Preamble is before the copy block
+        assert "Agent setup block" in output[:copy_start]
+        # The install content is between delimiters
+        between = output[copy_start:copy_end]
+        assert "local-first" in between.lower()
+
+
 class TestChecklistAddItemHelp:
     def test_help_text_mentions_exact_match(self) -> None:
         """Verify help text contains 'exact match' and does not imply ID usage."""

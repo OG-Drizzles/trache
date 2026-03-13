@@ -82,6 +82,10 @@ def init(
     config.save(cache_dir)
     console.print(f"[green]Initialised .trache/ for board {board_id}[/green]")
 
+    from trache.cli.agents import print_init_agent_guidance
+
+    print_init_agent_guidance()
+
 
 @app.command()
 def pull(
@@ -222,6 +226,21 @@ def sync(
             console.print(f"[green]Pulled {count} cards[/green]")
         else:
             console.print("[yellow]Dry run — skipping pull[/yellow]")
+
+
+@app.command()
+def agents(
+    reference: bool = typer.Option(
+        False, "--reference", help="Print on-demand command/workflow reference"
+    ),
+) -> None:
+    """Print AI agent setup instructions or command reference."""
+    from trache.cli.agents import print_install_block, print_reference_block
+
+    if reference:
+        print_reference_block()
+    else:
+        print_install_block()
 
 
 @app.command()
