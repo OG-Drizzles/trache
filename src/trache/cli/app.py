@@ -15,7 +15,7 @@ from trache.cli.comment import comment_app
 
 app = typer.Typer(
     name="trache",
-    help="Local-first Trello cache with Git-style sync.",
+    help="Local-first Trello cache with Git-style sync, optimised for AI-agent workflows.",
     no_args_is_help=True,
 )
 app.add_typer(card_app, name="card", help="Card operations")
