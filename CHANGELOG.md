@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.1.4 — 2026-03-13
+
+Onboarding, documentation, packaging, and Claude skill integration release.
+
+### Documentation
+
+- **README overhaul**: complete rewrite with all commands, options, semantics, validation status, and install instructions
+- **CLAUDE.md update**: refocused as agent operating policy with full command coverage and pointer to skill
+
+### Packaging
+
+- **License metadata fix**: changed `license = "MIT"` (PEP 639) to `license = {text = "MIT"}` for compatibility with older pip/packaging versions
+- **Install validation**: confirmed `pip install -e .` and `pip install .` both work cleanly
+
+### Claude Integration
+
+- **Trache skill**: added `.claude/skills/trache/SKILL.md` — command cookbook, workflow guide, troubleshooting, and examples
+
+## 0.1.3 — 2026-03-13
+
+Mock-backed workflow validation, documentation update, label CLI commands.
+
+### Features
+
+- **Label CLI**: `trache card add-label` and `trache card remove-label` commands
+- **Checklist help clarity**: improved CLI help text for checklist commands
+- **Friendly error handling**: user-facing error messages for common failure modes
+
+### Tests
+
+- Mock-backed coverage for remaining command paths (card create, archive, move, comment, checklist mutations)
+
+## 0.1.2 — 2026-03-12
+
+Follow-up audit clearance release.
+
+### Fixes
+
+- Identifier block separator accumulation on push/pull cycles
+- Remaining audit findings cleared
+
 ## 0.1.1 — 2026-03-12
 
 Audit remediation release. Closes 12 of 13 findings from the initial implementation audit (F-012 rate limiting deferred).
