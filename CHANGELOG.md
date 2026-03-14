@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.1.7 — 2026-03-14
+
+Bug fixes and validation improvements.
+
+### Push Fixes
+
+- **Partial push exit code**: push now exits with code 1 when any card fails, instead of silently returning 0
+- **Invalid UID6 on push**: `push --card NOPE12` now gives a clear resolution error instead of "Nothing to push"
+- **Temp UID6 in identifier block**: newly created cards now get a corrected identifier block with the real UID6 pushed back to Trello
+- **Archive state for new cards**: locally created + archived cards are now created then archived on Trello in a single push
+- **Pushed-and-archived message**: push reports "Card <UID6> (<title>) successfully pushed and archived" for the two-step workflow
+
+### Pull Fixes
+
+- **Deleted remote card**: `pull --force --card` on a deleted remote card now gives a user-friendly error instead of a traceback
+- **Archived card cleanup**: `pull --card` on an archived card removes it from the discovery index
+- **Dirty pull guard wording**: error message now says `--force` instead of `force=True`
+
+### Validation & Warnings
+
+- **Label validation at edit time**: `add-label` now validates against `labels.json` and rejects unknown labels with guidance
+- **Duplicate list name detection**: `resolve_list_id` now errors on ambiguous list names with IDs for disambiguation
+- **Archived card edit warning**: edit commands warn when targeting an archived card (edit still proceeds)
+- **ValueError handling**: shared CLI error decorator now catches `ValueError` for clean error output
+
 ## 0.1.6 — 2026-03-14
 
 Agent block improvements and CLI display polish.

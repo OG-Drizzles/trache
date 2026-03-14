@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "trache"
-version = "0.1.6"
+version = "0.1.7"
 description = "Local-first Trello cache with Git-style sync — optimised for on-machine AI workflows"
 requires-python = ">=3.10"
 license = {text = "MIT"}
