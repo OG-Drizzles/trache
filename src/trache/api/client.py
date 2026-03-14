@@ -129,6 +129,32 @@ class TrelloClient:
         )
         return [self._parse_card(d) for d in data]
 
+    def create_list(self, board_id: str, name: str, pos: str = "bottom") -> TrelloList:
+        """Create a new list on a board."""
+        data = self._post("/lists", {"name": name, "idBoard": board_id, "pos": pos})
+        return TrelloList(
+            id=data["id"],
+            name=data["name"],
+            board_id=board_id,
+            closed=data.get("closed", False),
+            pos=data.get("pos", 0),
+        )
+
+    def rename_list(self, list_id: str, name: str) -> TrelloList:
+        """Rename a list."""
+        data = self._put(f"/lists/{list_id}", {"name": name})
+        return TrelloList(
+            id=data["id"],
+            name=data["name"],
+            board_id=data.get("idBoard", ""),
+            closed=data.get("closed", False),
+            pos=data.get("pos", 0),
+        )
+
+    def archive_list(self, list_id: str) -> None:
+        """Archive (close) a list."""
+        self._put(f"/lists/{list_id}/closed", {"value": True})
+
     # --- Comments ---
 
     def get_card_comments(self, card_id: str) -> list[Comment]:

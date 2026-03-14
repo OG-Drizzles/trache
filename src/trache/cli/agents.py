@@ -14,6 +14,7 @@ User instructions always override this block.
 **Default workflow:** `card list` → `card show` → edit locally → `status` / `diff` → `push`
 
 - **Local-first:** all reads are local (no API calls). All edits happen locally. Nothing hits the API until `trache push`.
+- **API-direct:** list mutations (`list create/rename/archive`) and comment commands hit the API immediately — no push needed.
 - **Pull refreshes from Trello** — only pull when the user asks, same as push and sync.
 - Prefer targeted operations (`--card <uid6>`, `--list "Name"`) over full-board pull/push.
 - Always review changes with `trache status` and `trache diff` before pushing.
@@ -34,14 +35,18 @@ Last 6 characters of a Trello card ID (uppercase). Used to reference cards in al
 
 ## Subcommands
 - `trache card` — list, show, edit-title, edit-desc, add-label, remove-label, move, create, archive
-- `trache checklist` — show, check, uncheck, add-item, remove-item
-- `trache comment` — add, list (**WARNING:** comment commands hit the API directly — they are NOT local-first)
+- `trache checklist` — show, check, uncheck, add-item, remove-item, create
+- `trache comment` — add, edit, delete, list
+- `trache label` — list, create, delete
+- `trache list` — show, create, rename, archive
 
 ## Discover
 trache card list                        # all cards
 trache card list --list "List Name"     # cards in one list
 trache card show <uid6>                 # full card detail
 trache checklist show <uid6>            # checklists for a card
+trache list show                        # all board lists
+trache label list                       # all board labels
 
 ## Mutate (local only)
 trache card edit-title <uid6> "New"     # change title
@@ -55,6 +60,17 @@ trache checklist check <uid6> <item_id> # check item
 trache checklist uncheck <uid6> <item_id>
 trache checklist add-item <uid6> "Checklist" "Item"
 trache checklist remove-item <uid6> <item_id>
+trache checklist create <uid6> "Name"   # create checklist
+trache label create "Name" --color green
+trache label delete "Name"
+
+## Mutate (API-direct)
+trache list create "Name"               # create list (--pos top|bottom)
+trache list rename "Old" "New"          # rename list
+trache list archive "Name" --yes        # archive list (requires --yes)
+trache comment add <uid6> "Text"        # add comment
+trache comment edit <uid6> <comment_id> "Text"  # edit comment
+trache comment delete <uid6> <comment_id>       # delete comment
 
 ## Sync
 trache pull                             # full board pull
@@ -64,11 +80,13 @@ trache push                             # push local changes to Trello
 trache push --card <uid6>              # push one card
 trache push --dry-run                   # preview what would be pushed
 trache sync                             # push then full pull (use only when full refresh needed)
+trache sync --card <uid6>              # push one card then pull it back
 trache status                           # dirty state summary
 trache diff                             # detailed diff
 
 ## Caveats
-- **Comments are NOT local-first** — `comment add` and `comment list` hit the Trello API immediately. Every other command is local until you push.
+- **Comments and list mutations are NOT local-first** — `comment add/edit/delete`, `comment list`, and `list create/rename/archive` hit the Trello API immediately.
+- Every other command is local until you push.
 - Dirty pull guard: `trache pull` refuses if local changes exist. Use --force to override.
 - push = send local changes only. sync = push then full pull. Use sync only when a full refresh is actually wanted.
 
@@ -80,11 +98,26 @@ Batch edit then push:
   trache status
   trache push
 
+Targeted sync (push one card and refresh it):
+  trache sync --card <uid6>
+
 Targeted refresh:
   trache pull --card <uid6>
 
 Full refresh after push:
   trache sync
+
+Agent batching — edit multiple cards then push once:
+  trache card edit-title <uid6a> "Title A"
+  trache card edit-title <uid6b> "Title B"
+  trache card move <uid6c> "Done"
+  trache status
+  trache push
+
+New list then create card in it:
+  trache list create "Sprint 42"
+  trache card create "Sprint 42" "First task" --desc "Description here"
+  trache push
 """
 
 def render_install_block(board_name: str | None = None) -> str:

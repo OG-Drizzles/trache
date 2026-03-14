@@ -163,6 +163,30 @@ def remove_card_from_index(card_id: str, index_dir: Path) -> None:
     _write_json(index_dir / INDEX_FILENAME, index)
 
 
+def add_list_to_index(list_id: str, name: str, pos: float, index_dir: Path) -> None:
+    """Add a new list to the index."""
+    index = _load_full_index(index_dir)
+    index["lists_by_id"][list_id] = {"name": name, "pos": pos}
+    _write_json(index_dir / INDEX_FILENAME, index)
+
+
+def update_list_in_index(list_id: str, name: str, pos: float, index_dir: Path) -> None:
+    """Update an existing list in the index."""
+    index = _load_full_index(index_dir)
+    existing = index["lists_by_id"].get(list_id, {})
+    index["lists_by_id"][list_id] = {"name": name, "pos": existing.get("pos", pos)}
+    _write_json(index_dir / INDEX_FILENAME, index)
+
+
+def remove_list_from_index(list_id: str, index_dir: Path) -> None:
+    """Remove a list from the index."""
+    index = _load_full_index(index_dir)
+    index["lists_by_id"].pop(list_id, None)
+    # Also remove from cards_by_list
+    index["cards_by_list"].pop(list_id, None)
+    _write_json(index_dir / INDEX_FILENAME, index)
+
+
 def resolve_card_id(identifier: str, index_dir: Path) -> str:
     """Resolve a card ID or UID6 to a full card ID.
 

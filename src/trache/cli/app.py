@@ -248,10 +248,13 @@ def push(
 
 @app.command()
 def sync(
+    card: Optional[str] = typer.Option(
+        None, "--card", "-c", help="Sync single card (push then pull one card)"
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show what would be synced"),
 ) -> None:
     """Push local changes then pull latest from Trello."""
-    from trache.sync.pull import pull_full_board
+    from trache.sync.pull import pull_card, pull_full_board
     from trache.sync.push import push_changes
 
     client, config = _get_client()
@@ -259,25 +262,33 @@ def sync(
 
     with client:
         # Push first
-        changeset, result = push_changes(config, client, cache_dir, dry_run=dry_run)
+        changeset, result = push_changes(
+            config, client, cache_dir, dry_run=dry_run, card_filter=card,
+        )
         if not changeset.is_empty:
             console.print(f"Pushed {result.total} changes")
             if result.errors:
                 for err in result.errors:
                     console.print(f"[red]Error: {err}[/red]")
                 console.print(
-                    "[red]Push had errors — skipping full pull to preserve local state[/red]"
+                    "[red]Push had errors — skipping pull to preserve local state[/red]"
                 )
                 raise typer.Exit(1)
 
-        # Only full pull if no errors
+        # Only pull if no errors
         if not dry_run:
-            result = pull_full_board(config, client, cache_dir, force=True)
-            console.print(
-                f"[green]Pulled {result.board_name}: "
-                f"{result.cards} cards, {result.lists} lists, "
-                f"{result.labels} labels, {result.checklists} checklists[/green]"
-            )
+            if card:
+                pull_result = pull_card(card, config, client, cache_dir, force=True)
+                console.print(
+                    f"[green]Pulled card: {escape(pull_result.title)} [{pull_result.uid6}][/green]"
+                )
+            else:
+                pull_result = pull_full_board(config, client, cache_dir, force=True)
+                console.print(
+                    f"[green]Pulled {escape(pull_result.board_name)}: "
+                    f"{pull_result.cards} cards, {pull_result.lists} lists, "
+                    f"{pull_result.labels} labels, {pull_result.checklists} checklists[/green]"
+                )
         else:
             console.print("[yellow]Dry run — skipping pull[/yellow]")
 
