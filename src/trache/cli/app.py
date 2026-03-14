@@ -5,6 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
+import os
+
+import httpx
 import typer
 from rich.console import Console
 from rich.markup import escape
@@ -45,6 +48,7 @@ def _get_client():
 def init(
     board_id: str = typer.Option(None, "--board-id", "-b", help="Trello board ID"),
     board_url: str = typer.Option(None, "--board-url", "-u", help="Trello board URL"),
+    auth: bool = typer.Option(False, "--auth", help="Print auth/token setup guidance"),
 ) -> None:
     """Initialise Trache cache for a board."""
     from trache.config import TracheConfig, ensure_cache_structure
@@ -68,20 +72,52 @@ def init(
 
     config = TracheConfig(board_id=board_id)
 
-    # Try to fetch board name if auth is available
-    try:
+    # Detect auth state from env vars
+    api_key_val = os.environ.get(config.api_key_env)
+    token_val = os.environ.get(config.token_env)
+    auth_configured = bool(api_key_val and token_val)
+
+    # Show auth guidance if --auth flag or auth not configured
+    from trache.cli.agents import print_auth_guidance
+
+    if auth or not auth_configured:
+        print_auth_guidance(
+            api_key_val or None,
+            key_env=config.api_key_env,
+            token_env=config.token_env,
+        )
+
+    # Token validation and board name fetch
+    if not auth_configured:
+        console.print(
+            "[yellow]Auth not configured — skipping board name fetch and token validation.[/yellow]"
+        )
+    else:
         from trache.api.auth import TrelloAuth
         from trache.api.client import TrelloClient
 
-        auth = TrelloAuth.from_env(config.api_key_env, config.token_env)
-        with TrelloClient(auth) as client:
-            board = client.get_board(board_id)
-            config.board_name = board.name
-            console.print(f"Board: [bold]{board.name}[/bold]")
-    except Exception:
-        console.print(
-            "[yellow]Could not fetch board name (auth not configured or offline)[/yellow]"
-        )
+        auth_obj = TrelloAuth.from_env(config.api_key_env, config.token_env)
+        with TrelloClient(auth_obj) as client:
+            # Validate token
+            try:
+                member = client.get_current_member()
+                name = member.get("fullName") or member.get("username", "unknown")
+                console.print(f"[green]Token valid — authenticated as {name}[/green]")
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 401:
+                    console.print("[red]Token validation failed (401 Unauthorized)[/red]")
+                else:
+                    raise
+
+            # Fetch board name (best-effort)
+            try:
+                board = client.get_board(board_id)
+                config.board_name = board.name
+                console.print(f"Board: [bold]{board.name}[/bold]")
+            except Exception:
+                console.print(
+                    "[yellow]Could not fetch board name[/yellow]"
+                )
 
     ensure_cache_structure(cache_dir)
     config.save(cache_dir)

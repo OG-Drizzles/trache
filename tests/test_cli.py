@@ -309,6 +309,67 @@ class TestAgents:
         assert "local-first" in between.lower()
 
 
+class TestInitAuth:
+    def test_init_no_env_vars_shows_auth_panel_with_placeholder(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """init with no env vars → output contains Auth Setup panel + YOUR_API_KEY placeholder."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("TRELLO_API_KEY", raising=False)
+        monkeypatch.delenv("TRELLO_TOKEN", raising=False)
+
+        result = runner.invoke(app, ["init", "--board-id", "abc123def456789012345678"])
+        assert result.exit_code == 0
+        assert "Auth Setup" in result.output
+        assert "YOUR_API_KEY" in result.output
+
+    def test_init_api_key_only_shows_real_key_in_url(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """init with API key only → output contains real key in URL."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("TRELLO_API_KEY", "mykey123")
+        monkeypatch.delenv("TRELLO_TOKEN", raising=False)
+
+        result = runner.invoke(app, ["init", "--board-id", "abc123def456789012345678"])
+        assert result.exit_code == 0
+        assert "Auth Setup" in result.output
+        assert "mykey123" in result.output
+        assert "YOUR_API_KEY" not in result.output
+
+    def test_init_auth_flag_with_both_vars_still_shows_panel(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """init --auth with both vars → still prints guidance panel."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("TRELLO_API_KEY", "test_key")
+        monkeypatch.setenv("TRELLO_TOKEN", "test_token")
+
+        result = runner.invoke(app, ["init", "--board-id", "abc123def456789012345678", "--auth"])
+        assert "Auth Setup" in result.output
+
+
+class TestBuildAuthUrl:
+    def test_build_auth_url_with_key(self) -> None:
+        from trache.cli.agents import build_auth_url
+
+        url = build_auth_url("mykey")
+        assert "key=mykey" in url
+        assert "YOUR_API_KEY" not in url
+
+    def test_build_auth_url_without_key(self) -> None:
+        from trache.cli.agents import build_auth_url
+
+        url = build_auth_url(None)
+        assert "key=YOUR_API_KEY" in url
+
+    def test_build_auth_url_default(self) -> None:
+        from trache.cli.agents import build_auth_url
+
+        url = build_auth_url()
+        assert "key=YOUR_API_KEY" in url
+
+
 class TestCardCreateTempMarker:
     def test_create_card_uid6_ends_with_temp_marker(self, tmp_path: Path, monkeypatch) -> None:
         """Locally created cards should have UID6 ending with 'T~'."""

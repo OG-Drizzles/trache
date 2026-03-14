@@ -59,6 +59,12 @@ class TrelloClient:
         resp = self._client.delete(path, params=self._auth.query_params)
         resp.raise_for_status()
 
+    # --- Member ---
+
+    def get_current_member(self) -> dict[str, str]:
+        """Validate token via GET /members/me."""
+        return self._get("/members/me", {"fields": "fullName,username"})
+
     # --- Board ---
 
     def get_board(self, board_id: str) -> Board:

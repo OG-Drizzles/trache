@@ -47,7 +47,11 @@ pip install -e ".[oauth]" # OAuth support (authlib)
 You need a Trello API key and token:
 
 1. Get your API key from https://trello.com/power-ups/admin
-2. Generate a token using the key
+2. Generate a token by visiting (substitute your API key):
+
+   https://trello.com/1/authorize?expiration=never&name=trache&scope=read,write&response_type=token&key=YOUR_API_KEY
+
+   Or run `trache init --auth` to print the URL with your key substituted.
 3. Set environment variables:
 
 ```bash

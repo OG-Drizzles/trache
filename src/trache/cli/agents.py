@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import webbrowser
+
+import click
+import typer
 from rich.console import Console
 from rich.panel import Panel
 
@@ -169,3 +173,44 @@ def print_init_agent_guidance(board_name: str | None = None) -> None:
     console.print()
     console.print(Panel(f"[dim]For manual setup:[/dim] {_HUMAN_NOTE}", expand=False))
     console.print()
+
+
+TRELLO_AUTH_URL_TEMPLATE = (
+    "https://trello.com/1/authorize?expiration=never&name=trache"
+    "&scope=read,write&response_type=token&key={api_key}"
+)
+
+
+def build_auth_url(api_key: str | None = None) -> str:
+    """Build the Trello authorize URL, substituting the key if available."""
+    return TRELLO_AUTH_URL_TEMPLATE.format(api_key=api_key or "YOUR_API_KEY")
+
+
+def print_auth_guidance(
+    api_key: str | None,
+    *,
+    key_env: str = "TRELLO_API_KEY",
+    token_env: str = "TRELLO_TOKEN",
+) -> None:
+    """Print a Rich panel with auth/token setup instructions."""
+    console = Console()
+    auth_url = build_auth_url(api_key)
+
+    lines = [
+        "[bold]Auth Setup[/bold]\n",
+        "1. Get your API key from: https://trello.com/power-ups/admin\n",
+        f"2. Generate a token by visiting:\n   {auth_url}\n",
+        "3. Export environment variables:\n"
+        f"   export {key_env}=<your_api_key>\n"
+        f"   export {token_env}=<your_token>",
+    ]
+
+    console.print(Panel("\n".join(lines), title="Trello Auth", expand=False))
+
+    try:
+        if typer.confirm("Open the authorize URL in your browser?", default=False):
+            webbrowser.open(auth_url)
+    except (EOFError, KeyboardInterrupt):
+        pass
+    except click.exceptions.Abort:
+        console.print()
