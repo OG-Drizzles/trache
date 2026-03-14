@@ -10,7 +10,7 @@ from uuid import uuid4
 import typer
 from rich.console import Console
 
-from trache.cli._errors import handle_resolve_errors
+from trache.cli._errors import guard_archived, handle_resolve_errors
 
 checklist_app = typer.Typer(no_args_is_help=True)
 console = Console()
@@ -79,14 +79,18 @@ def show(
 def check(
     card_identifier: str = typer.Argument(help="Card ID or UID6"),
     item_id: str = typer.Argument(help="Checklist item ID"),
+    force: bool = typer.Option(False, "--force", help="Allow editing archived cards"),
 ) -> None:
     """Mark a checklist item as complete (local-first, push to sync)."""
+    guard_archived(card_identifier, _cache_dir(), force=force)
     card_id, checklists = _load_checklists_for_card(card_identifier)
 
     found = False
+    already = False
     for cl in checklists:
         for item in cl.get("items", []):
             if item["id"] == item_id:
+                already = item["state"] == "complete"
                 item["state"] = "complete"
                 found = True
                 break
@@ -96,6 +100,10 @@ def check(
     if not found:
         console.print(f"[red]Item {item_id} not found[/red]")
         raise typer.Exit(1)
+
+    if already:
+        console.print("[dim]Item already complete — no change[/dim]")
+        return
 
     _save_checklists_for_card(card_id, checklists)
     _update_card_content_modified_at(card_id)
@@ -107,14 +115,18 @@ def check(
 def uncheck(
     card_identifier: str = typer.Argument(help="Card ID or UID6"),
     item_id: str = typer.Argument(help="Checklist item ID"),
+    force: bool = typer.Option(False, "--force", help="Allow editing archived cards"),
 ) -> None:
     """Mark a checklist item as incomplete (local-first, push to sync)."""
+    guard_archived(card_identifier, _cache_dir(), force=force)
     card_id, checklists = _load_checklists_for_card(card_identifier)
 
     found = False
+    already = False
     for cl in checklists:
         for item in cl.get("items", []):
             if item["id"] == item_id:
+                already = item["state"] == "incomplete"
                 item["state"] = "incomplete"
                 found = True
                 break
@@ -124,6 +136,10 @@ def uncheck(
     if not found:
         console.print(f"[red]Item {item_id} not found[/red]")
         raise typer.Exit(1)
+
+    if already:
+        console.print("[dim]Item already incomplete — no change[/dim]")
+        return
 
     _save_checklists_for_card(card_id, checklists)
     _update_card_content_modified_at(card_id)
@@ -138,8 +154,10 @@ def add_item(
         help="Checklist name (exact match — use 'checklist show' to see names)"
     ),
     text: str = typer.Argument(help="Item text"),
+    force: bool = typer.Option(False, "--force", help="Allow editing archived cards"),
 ) -> None:
     """Add an item to a checklist by name (local-first, push to sync)."""
+    guard_archived(card_identifier, _cache_dir(), force=force)
     card_id, checklists = _load_checklists_for_card(card_identifier)
 
     target_cl = None
@@ -173,8 +191,10 @@ def add_item(
 def remove_item(
     card_identifier: str = typer.Argument(help="Card ID or UID6"),
     item_id: str = typer.Argument(help="Checklist item ID"),
+    force: bool = typer.Option(False, "--force", help="Allow editing archived cards"),
 ) -> None:
     """Remove an item from a checklist (local-first, push to sync)."""
+    guard_archived(card_identifier, _cache_dir(), force=force)
     card_id, checklists = _load_checklists_for_card(card_identifier)
 
     found = False

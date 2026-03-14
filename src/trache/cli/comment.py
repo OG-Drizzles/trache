@@ -36,7 +36,7 @@ def add(
     auth = TrelloAuth.from_env(config.api_key_env, config.token_env)
     with TrelloClient(auth) as client:
         comment = client.add_comment(card_id, text)
-    console.print(f"[green]Comment added ({comment.id})[/green]")
+    console.print(f"[green]Comment added ({comment.id}) (API — posted immediately)[/green]")
 
 
 @comment_app.command("list")
@@ -59,9 +59,10 @@ def list_comments(
         comments = client.get_card_comments(card_id)
 
     if not comments:
-        console.print("[dim]No comments[/dim]")
+        console.print("[dim]No comments (fetched from API)[/dim]")
         return
 
+    console.print(f"[dim]{len(comments)} comment(s) (fetched from API)[/dim]")
     for c in comments:
         date_str = c.created_at.strftime("%Y-%m-%d %H:%M") if c.created_at else "?"
         console.print(f"[bold]{c.author}[/bold] ({date_str}) [dim][{c.id}][/dim]:")

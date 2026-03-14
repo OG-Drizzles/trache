@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from difflib import unified_diff
 from pathlib import Path
 
 from trache.cache.store import list_card_files, read_card_file
@@ -30,6 +31,7 @@ class CardChange:
     change_type: str  # "modified" | "added" | "deleted"
     field_changes: dict[str, tuple[str, str]] = field(default_factory=dict)  # field: (old, new)
     checklist_changes: list[ChecklistChange] = field(default_factory=list)
+    annotations: list[str] = field(default_factory=list)  # e.g. ["archived", "in Done"]
 
 
 @dataclass
@@ -158,10 +160,25 @@ def compute_diff(cache_dir: Path) -> Changeset:
     # Added cards (in working but not in clean)
     for card_id in working_files.keys() - clean_files.keys():
         card = read_card_file(working_files[card_id])
+        annotations: list[str] = []
+        if card.closed:
+            annotations.append("archived")
+        if card.list_id:
+            # Resolve list name from index if available
+            try:
+                from trache.cache.index import resolve_list_name
+
+                list_name = resolve_list_name(card.list_id, cache_dir / "indexes")
+                annotations.append(f"in {list_name}")
+            except (KeyError, FileNotFoundError):
+                pass
+        if card.labels:
+            annotations.append(f"labels: {', '.join(card.labels)}")
         changeset.added.append(CardChange(
             card_id=card_id,
             title=card.title,
             change_type="added",
+            annotations=annotations,
         ))
 
     # Deleted cards (in clean but not in working)
@@ -197,6 +214,11 @@ def compute_diff(cache_dir: Path) -> Changeset:
                 checklist_changes=cl_changes,
             ))
 
+    # Sort all lists for deterministic output
+    changeset.added.sort(key=lambda c: c.title)
+    changeset.modified.sort(key=lambda c: c.title)
+    changeset.deleted.sort(key=lambda c: c.title)
+
     return changeset
 
 
@@ -210,7 +232,8 @@ def format_diff(changeset: Changeset) -> str:
     if changeset.added:
         lines.append(f"Added ({len(changeset.added)}):")
         for c in changeset.added:
-            lines.append(f"  + {c.title} [{c.card_id}]")
+            suffix = f" ({', '.join(c.annotations)})" if c.annotations else ""
+            lines.append(f"  + {c.title} [{c.card_id}]{suffix}")
         lines.append("")
 
     if changeset.modified:
@@ -218,9 +241,21 @@ def format_diff(changeset: Changeset) -> str:
         for c in changeset.modified:
             lines.append(f"  ~ {c.title} [{c.card_id}]")
             for f, (old, new) in c.field_changes.items():
-                old_short = _truncate(old, 60)
-                new_short = _truncate(new, 60)
-                lines.append(f"    {f}: {old_short} → {new_short}")
+                if f == "description":
+                    lines.append(f"    {f}:")
+                    diff_lines = unified_diff(
+                        old.splitlines(keepends=True),
+                        new.splitlines(keepends=True),
+                        fromfile="clean",
+                        tofile="working",
+                        lineterm="",
+                    )
+                    for dl in diff_lines:
+                        lines.append(f"      {dl.rstrip()}")
+                else:
+                    old_short = _truncate(old, 60)
+                    new_short = _truncate(new, 60)
+                    lines.append(f"    {f}: {old_short} → {new_short}")
             for cl_change in c.checklist_changes:
                 if cl_change.change_type == "state_change":
                     lines.append(

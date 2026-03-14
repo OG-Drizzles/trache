@@ -164,14 +164,40 @@ def remove_card_from_index(card_id: str, index_dir: Path) -> None:
 
 
 def resolve_card_id(identifier: str, index_dir: Path) -> str:
-    """Resolve a card ID or UID6 to a full card ID."""
+    """Resolve a card ID or UID6 to a full card ID.
+
+    Raises KeyError with a specific message depending on failure reason:
+    - No board initialised (no index file)
+    - Invalid UID6 format
+    - Card not found on this board
+    """
+    # Check board is initialised
+    index_path = index_dir / INDEX_FILENAME
+    has_index = index_path.exists()
+    if not has_index and not index_dir.exists():
+        raise KeyError(
+            f"No board initialised. Run 'trache init' and 'trache pull' first."
+        )
+
     # If it looks like a full ID (24 hex chars), return as-is
     if len(identifier) == 24:
         return identifier
 
+    # Validate UID6 format: 1-6 hex characters (or temp IDs containing '_' or '~')
+    is_temp_id = "_" in identifier or "~" in identifier
+    if not is_temp_id:
+        upper_id = identifier.upper()
+        if not (1 <= len(identifier) <= 6 and all(c in "0123456789ABCDEF" for c in upper_id)):
+            raise KeyError(
+                f"Invalid card identifier format: '{identifier}'. "
+                f"Expected a 6-character hex UID6 (e.g. 'A1B2C3'), "
+                f"a 24-character full card ID, or a temp ID."
+            )
+    else:
+        upper_id = identifier.upper()
+
     # Try UID6 lookup
     uid6_index = load_index(index_dir, "cards_by_uid6")
-    upper_id = identifier.upper()
     if upper_id in uid6_index:
         return uid6_index[upper_id]
 
@@ -188,7 +214,11 @@ def resolve_card_id(identifier: str, index_dir: Path) -> str:
             if stem == identifier or stem[-6:].upper() == upper_id:
                 return stem
 
-    raise KeyError(f"Cannot resolve card identifier: {identifier}")
+    raise KeyError(
+        f"Card '{identifier}' not found on this board. "
+        f"Run 'trache card list' to see available cards, "
+        f"or 'trache pull' to refresh from Trello."
+    )
 
 
 def resolve_list_id(identifier: str, index_dir: Path) -> str:

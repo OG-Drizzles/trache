@@ -43,9 +43,9 @@ class TestPullFullBoard:
         ]
         client = _make_mock_client(cards, lists)
 
-        count = pull_full_board(config, client, cache_dir)
+        result = pull_full_board(config, client, cache_dir)
 
-        assert count == 1
+        assert result.cards == 1
 
         # Check clean snapshot exists
         clean_file = cache_dir / "clean" / "cards" / "67abc123def4567890fedcba.md"

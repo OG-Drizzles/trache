@@ -170,18 +170,26 @@ class TestChecklistRemoveItem:
 
 class TestCardShowInvalidUID6:
     def test_invalid_uid6_friendly_error(self, tmp_path: Path, monkeypatch) -> None:
-        """card show XXXXXX → exit 1, 'Cannot resolve' in output (no traceback)."""
+        """card show XXXXXX → exit 1, 'Invalid card identifier' in output (no traceback)."""
         _setup_cli_cache(tmp_path, monkeypatch)
         result = runner.invoke(app, ["card", "show", "XXXXXX"])
         assert result.exit_code == 1
-        assert "Cannot resolve" in result.output
+        assert "Invalid card identifier format" in result.output
+        assert "Traceback" not in result.output
+
+    def test_valid_hex_not_found(self, tmp_path: Path, monkeypatch) -> None:
+        """card show ABCDEF (valid hex but not on board) → 'not found on this board'."""
+        _setup_cli_cache(tmp_path, monkeypatch)
+        result = runner.invoke(app, ["card", "show", "ABCDEF"])
+        assert result.exit_code == 1
+        assert "not found on this board" in result.output
         assert "Traceback" not in result.output
 
     def test_invalid_uid6_on_edit_title(self, tmp_path: Path, monkeypatch) -> None:
         _setup_cli_cache(tmp_path, monkeypatch)
         result = runner.invoke(app, ["card", "edit-title", "XXXXXX", "New"])
         assert result.exit_code == 1
-        assert "Cannot resolve" in result.output
+        assert "Invalid card identifier format" in result.output
         assert "Traceback" not in result.output
 
 
@@ -219,7 +227,7 @@ class TestCardAddLabel:
         _setup_cli_cache(tmp_path, monkeypatch)
         result = runner.invoke(app, ["card", "add-label", "XXXXXX", "Bug"])
         assert result.exit_code == 1
-        assert "Cannot resolve" in result.output
+        assert "Invalid card identifier format" in result.output
 
 
 class TestCardRemoveLabel:

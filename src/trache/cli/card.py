@@ -7,9 +7,10 @@ from typing import Optional
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
-from trache.cli._errors import handle_resolve_errors
+from trache.cli._errors import guard_archived, handle_resolve_errors
 
 card_app = typer.Typer(no_args_is_help=True)
 console = Console()
@@ -17,21 +18,6 @@ console = Console()
 
 def _cache_dir() -> Path:
     return Path(".trache")
-
-
-def _warn_if_archived(identifier: str) -> None:
-    """Print a warning if the card is archived. Does not block the operation."""
-    from trache.cache.working import read_working_card
-
-    try:
-        card = read_working_card(identifier, _cache_dir())
-        if card.closed:
-            console.print(
-                f"[yellow]Warning: card [{card.uid6}] is archived. "
-                f"Editing an archived card may have no effect on Trello.[/yellow]"
-            )
-    except (KeyError, FileNotFoundError):
-        pass  # Card not found — let the actual command handle the error
 
 
 @card_app.command("list")
@@ -87,7 +73,7 @@ def show_card(
         title_display = card.title[:120] + f"… (len={len(card.title)})"
     else:
         title_display = card.title
-    console.print(f"[bold]{title_display}[/bold]  [{card.uid6}]")
+    console.print(f"[bold]{escape(title_display)}[/bold]  [{card.uid6}]")
 
     # List name
     list_name = resolve_list_name(card.list_id, cache_dir / "indexes")
@@ -126,13 +112,14 @@ def show_card(
 def edit_title(
     identifier: str = typer.Argument(help="Card ID or UID6"),
     title: str = typer.Argument(help="New title"),
+    force: bool = typer.Option(False, "--force", help="Allow editing archived cards"),
 ) -> None:
     """Edit card title in working copy."""
     from trache.cache.working import edit_title as _edit_title
 
-    _warn_if_archived(identifier)
+    guard_archived(identifier, _cache_dir(), force=force)
     card = _edit_title(identifier, title, _cache_dir())
-    console.print(f"[green]Title updated: {card.title} [{card.uid6}][/green]")
+    console.print(f"[green]Title updated: {escape(card.title)} [{card.uid6}][/green]")
 
 
 @card_app.command("edit-desc")
@@ -140,13 +127,14 @@ def edit_title(
 def edit_desc(
     identifier: str = typer.Argument(help="Card ID or UID6"),
     desc: str = typer.Argument(help="New description"),
+    force: bool = typer.Option(False, "--force", help="Allow editing archived cards"),
 ) -> None:
     """Edit card description in working copy."""
     from trache.cache.working import edit_description
 
-    _warn_if_archived(identifier)
+    guard_archived(identifier, _cache_dir(), force=force)
     card = edit_description(identifier, desc, _cache_dir())
-    console.print(f"[green]Description updated: {card.title} [{card.uid6}][/green]")
+    console.print(f"[green]Description updated: {escape(card.title)} [{card.uid6}][/green]")
 
 
 @card_app.command("move")
@@ -154,16 +142,17 @@ def edit_desc(
 def move(
     identifier: str = typer.Argument(help="Card ID or UID6"),
     list_target: str = typer.Argument(help="Target list (ID or name)"),
+    force: bool = typer.Option(False, "--force", help="Allow editing archived cards"),
 ) -> None:
     """Move card to a different list in working copy."""
     from trache.cache.index import resolve_list_name
     from trache.cache.working import move_card
 
-    _warn_if_archived(identifier)
+    guard_archived(identifier, _cache_dir(), force=force)
     cache_dir = _cache_dir()
     card = move_card(identifier, list_target, cache_dir)
     list_display = resolve_list_name(card.list_id, cache_dir / "indexes")
-    console.print(f"[green]Moved {card.title} [{card.uid6}] to list {list_display}[/green]")
+    console.print(f"[green]Moved {escape(card.title)} [{card.uid6}] to list {escape(list_display)}[/green]")
 
 
 @card_app.command("create")
@@ -179,7 +168,7 @@ def create(
 
     config = TracheConfig.load()
     card = create_card(list_target, title, _cache_dir(), config.board_id, desc)
-    console.print(f"[green]Created: {card.title} [{card.uid6}] (local only — push to sync)[/green]")
+    console.print(f"[green]Created: {escape(card.title)} [{card.uid6}] (local only — push to sync)[/green]")
 
 
 @card_app.command("archive")
@@ -192,7 +181,7 @@ def archive(
 
     card = archive_card(identifier, _cache_dir())
     console.print(
-        f"[yellow]Archived: {card.title} [{card.uid6}] (local only — push to sync)[/yellow]"
+        f"[yellow]Archived: {escape(card.title)} [{card.uid6}] (local only — push to sync)[/yellow]"
     )
 
 
@@ -201,16 +190,17 @@ def archive(
 def add_label_cmd(
     identifier: str = typer.Argument(help="Card ID or UID6"),
     label: str = typer.Argument(help="Label name to add"),
+    force: bool = typer.Option(False, "--force", help="Allow editing archived cards"),
 ) -> None:
     """Add a label to a card in working copy."""
     from trache.cache.working import add_label
 
-    _warn_if_archived(identifier)
+    guard_archived(identifier, _cache_dir(), force=force)
     card, added = add_label(identifier, label, _cache_dir())
     if added:
-        console.print(f"[green]Label '{label}' added to {card.title} [{card.uid6}][/green]")
+        console.print(f"[green]Label '{escape(label)}' added to {escape(card.title)} [{card.uid6}][/green]")
     else:
-        console.print(f"Label '{label}' already present on {card.title} [{card.uid6}]")
+        console.print(f"Label '{escape(label)}' already present on {escape(card.title)} [{card.uid6}]")
 
 
 @card_app.command("remove-label")
@@ -218,15 +208,16 @@ def add_label_cmd(
 def remove_label_cmd(
     identifier: str = typer.Argument(help="Card ID or UID6"),
     label: str = typer.Argument(help="Label name to remove"),
+    force: bool = typer.Option(False, "--force", help="Allow editing archived cards"),
 ) -> None:
     """Remove a label from a card in working copy."""
     from trache.cache.working import remove_label
 
-    _warn_if_archived(identifier)
+    guard_archived(identifier, _cache_dir(), force=force)
     try:
         card = remove_label(identifier, label, _cache_dir())
         console.print(
-            f"[green]Label '{label}' removed from {card.title} [{card.uid6}][/green]"
+            f"[green]Label '{escape(label)}' removed from {escape(card.title)} [{card.uid6}][/green]"
         )
     except ValueError as e:
         console.print(f"[red]{e}[/red]")

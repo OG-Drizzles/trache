@@ -72,8 +72,8 @@ class TestDirtyPullGuard:
         write_card_file(dirty_card, cache_dir / "working" / "cards")
 
         # Force pull should succeed
-        count = pull_full_board(config, client, cache_dir, force=True)
-        assert count == 1
+        result = pull_full_board(config, client, cache_dir, force=True)
+        assert result.cards == 1
 
         # Working copy should be overwritten to clean state
         from trache.cache.store import read_card_file
@@ -169,8 +169,8 @@ class TestSyncHappyPath:
         assert len(result.errors) == 0
 
         # Pull phase (force=True since push just ran)
-        count = pull_full_board(config, client, cache_dir, force=True)
-        assert count == 1
+        pull_result = pull_full_board(config, client, cache_dir, force=True)
+        assert pull_result.cards == 1
 
         # Final state: clean and working should match
         from trache.cache.store import read_card_file

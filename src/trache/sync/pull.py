@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -14,6 +15,17 @@ from trache.cache.snapshot import write_clean_snapshot
 from trache.cache.store import read_card_file, write_card_file
 from trache.config import SyncState, TracheConfig
 from trache.identity import strip_block
+
+
+@dataclass
+class PullResult:
+    """Result of a full board pull with counts for display."""
+
+    board_name: str
+    cards: int
+    lists: int
+    labels: int
+    checklists: int
 
 
 def _check_dirty_state(cache_dir: Path, force: bool) -> None:
@@ -29,10 +41,10 @@ def _check_dirty_state(cache_dir: Path, force: bool) -> None:
 
 def pull_full_board(
     config: TracheConfig, client: TrelloClient, cache_dir: Path, *, force: bool = False
-) -> int:
+) -> PullResult:
     """Pull entire board: lists, cards, checklists → clean + working + indexes.
 
-    Returns the number of cards pulled.
+    Returns a PullResult with counts for display.
     Raises RuntimeError if working copy has unpushed changes and force=False.
     """
     _check_dirty_state(cache_dir, force)
@@ -104,7 +116,13 @@ def pull_full_board(
     )
     state.save(cache_dir)
 
-    return len(cards)
+    return PullResult(
+        board_name=board.name,
+        cards=len(cards),
+        lists=len(lists),
+        labels=len(labels),
+        checklists=len(checklists),
+    )
 
 
 def pull_card(

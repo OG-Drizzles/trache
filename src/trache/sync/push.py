@@ -5,23 +5,40 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
+
+from rich.console import Console
 
 from trache.api.client import TrelloClient
 from trache.cache.diff import CardChange, Changeset, ChecklistChange, compute_diff
 from trache.cache.store import read_card_file
-from trache.config import TracheConfig
+from trache.config import SyncState, TracheConfig
 from trache.identity import generate_block, inject_block
 from trache.sync.pull import pull_card
+
+_console = Console()
+
+
+@dataclass
+class PushEntry:
+    """A single pushed card with metadata for display."""
+
+    card_id: str
+    title: str
+    uid6: str
+    change_type: str  # "modified" | "created" | "archived"
+    fields: list[str] = field(default_factory=list)  # changed field names
+    old_uid6: str = ""  # temp UID6 before push (for created cards)
+    also_archived: bool = False  # created card that was also archived
 
 
 @dataclass
 class PushResult:
     """Result of a push operation."""
 
-    pushed: list[str] = field(default_factory=list)
-    created: list[str] = field(default_factory=list)
-    archived: list[str] = field(default_factory=list)
+    pushed: list[PushEntry] = field(default_factory=list)
+    created: list[PushEntry] = field(default_factory=list)
+    archived: list[PushEntry] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -35,10 +52,12 @@ def push_changes(
     cache_dir: Path,
     dry_run: bool = False,
     card_filter: Optional[str] = None,
+    on_progress: Optional[Callable[[int, int, str], None]] = None,
 ) -> tuple[Changeset, PushResult]:
     """Push local changes to Trello.
 
     Returns (changeset, result). If dry_run, no API calls are made.
+    on_progress(current, total, description) is called before each card push.
     """
     changeset = compute_diff(cache_dir)
     result = PushResult()
@@ -57,54 +76,117 @@ def push_changes(
 
     working_dir = cache_dir / "working" / "cards"
 
+    # Count total items for progress reporting
+    all_changes: list[tuple[str, CardChange]] = []
     for change in changeset.modified:
         if card_filter and not _matches_filter(change.card_id, card_filter, cache_dir):
             continue
-        if dry_run:
-            result.pushed.append(change.card_id)
-            continue
-        try:
-            _push_modified_card(change, working_dir, client, config, cache_dir)
-            result.pushed.append(change.card_id)
-        except Exception as e:
-            result.errors.append(f"Failed to push {change.card_id}: {e}")
-
+        all_changes.append(("modified", change))
     for change in changeset.added:
         if card_filter and not _matches_filter(change.card_id, card_filter, cache_dir):
             continue
-        if dry_run:
-            result.created.append(change.card_id)
-            continue
-        try:
-            status = _push_new_card(change, working_dir, client, config, cache_dir)
-            if status.startswith("pushed_and_archived:"):
-                result.created.append(status)
-            else:
-                result.created.append(change.card_id)
-        except Exception as e:
-            result.errors.append(f"Failed to create {change.card_id}: {e}")
-
+        all_changes.append(("added", change))
     for change in changeset.deleted:
         if card_filter and not _matches_filter(change.card_id, card_filter, cache_dir):
             continue
-        if dry_run:
-            result.archived.append(change.card_id)
-            continue
-        try:
-            client.archive_card(change.card_id)
-            result.archived.append(change.card_id)
-        except Exception as e:
-            result.errors.append(f"Failed to archive {change.card_id}: {e}")
+        all_changes.append(("deleted", change))
+
+    total = len(all_changes)
+
+    for idx, (kind, change) in enumerate(all_changes, 1):
+        uid6 = change.card_id[-6:].upper()
+
+        if kind == "modified":
+            entry = PushEntry(
+                card_id=change.card_id,
+                title=change.title,
+                uid6=uid6,
+                change_type="modified",
+                fields=list(change.field_changes.keys()),
+            )
+            if dry_run:
+                result.pushed.append(entry)
+                continue
+            if on_progress:
+                on_progress(idx, total, f"Updating {change.title} [{uid6}]")
+            try:
+                _push_modified_card(change, working_dir, client, config, cache_dir)
+                result.pushed.append(entry)
+            except Exception as e:
+                result.errors.append(f"Failed to push {change.card_id}: {e}")
+
+        elif kind == "added":
+            if dry_run:
+                entry = PushEntry(
+                    card_id=change.card_id,
+                    title=change.title,
+                    uid6=uid6,
+                    change_type="created",
+                    old_uid6=uid6,
+                )
+                result.created.append(entry)
+                continue
+            if on_progress:
+                on_progress(idx, total, f"Creating {change.title} [{uid6}]")
+            try:
+                create_result = _push_new_card(
+                    change, working_dir, client, config, cache_dir
+                )
+                result.created.append(create_result)
+            except Exception as e:
+                result.errors.append(f"Failed to create {change.card_id}: {e}")
+
+        elif kind == "deleted":
+            entry = PushEntry(
+                card_id=change.card_id,
+                title=change.title,
+                uid6=uid6,
+                change_type="archived",
+            )
+            if dry_run:
+                result.archived.append(entry)
+                continue
+            if on_progress:
+                on_progress(idx, total, f"Archiving {change.title} [{uid6}]")
+            try:
+                client.archive_card(change.card_id)
+                result.archived.append(entry)
+            except Exception as e:
+                result.errors.append(f"Failed to archive {change.card_id}: {e}")
 
     # Re-pull touched objects (not in dry-run)
     if not dry_run:
-        for card_id in result.pushed:
+        for entry in result.pushed:
             try:
-                pull_card(card_id, config, client, cache_dir, force=True)
+                pull_card(entry.card_id, config, client, cache_dir, force=True)
             except Exception as e:
-                result.errors.append(f"Re-pull failed for {card_id}: {e}")
+                result.errors.append(f"Re-pull failed for {entry.card_id}: {e}")
 
     return changeset, result
+
+
+def _check_remote_conflict(
+    card_id: str, client: TrelloClient, cache_dir: Path
+) -> None:
+    """Warn if the remote card has changed since last pull."""
+    state = SyncState.load(cache_dir)
+    stored_ts = state.card_timestamps.get(card_id)
+    if not stored_ts:
+        return  # No baseline — skip check
+
+    try:
+        remote = client.get_card(card_id)
+        if remote.last_activity:
+            remote_ts = remote.last_activity.isoformat()
+            if remote_ts != stored_ts:
+                uid6 = card_id[-6:].upper()
+                _console.print(
+                    f"[yellow]Warning: card [{uid6}] was modified on Trello "
+                    f"since last pull. Local changes will overwrite remote. "
+                    f"Pull first to see remote changes.[/yellow]"
+                )
+    except Exception:
+        pass  # Network error — don't block push for a warning
 
 
 def _push_modified_card(
@@ -115,6 +197,7 @@ def _push_modified_card(
     cache_dir: Path,
 ) -> None:
     """Push a modified card to Trello."""
+    _check_remote_conflict(change.card_id, client, cache_dir)
     card = read_card_file(working_dir / f"{change.card_id}.md")
 
     update_fields: dict = {}
@@ -187,8 +270,8 @@ def _push_new_card(
     client: TrelloClient,
     config: TracheConfig,
     cache_dir: Path,
-) -> str:
-    """Create a new card on Trello. Returns status message."""
+) -> PushEntry:
+    """Create a new card on Trello. Returns a PushEntry with reconciliation info."""
     card = read_card_file(working_dir / f"{change.card_id}.md")
 
     # Inject identifier block with temp UID (will be corrected below)
@@ -240,9 +323,15 @@ def _push_new_card(
     # Re-pull the real card to reconcile
     pull_card(new_card.id, config, client, cache_dir, force=True)
 
-    if was_archived:
-        return f"pushed_and_archived:{real_uid6}:{card.title}"
-    return f"created:{real_uid6}:{card.title}"
+    old_uid6 = change.card_id[-6:].upper()
+    return PushEntry(
+        card_id=new_card.id,
+        title=card.title,
+        uid6=real_uid6,
+        change_type="created",
+        old_uid6=old_uid6,
+        also_archived=was_archived,
+    )
 
 
 def _push_checklist_changes(

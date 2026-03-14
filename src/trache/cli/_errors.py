@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -26,3 +27,29 @@ def handle_resolve_errors(func):
             raise typer.Exit(1)
 
     return wrapper
+
+
+def guard_archived(identifier: str, cache_dir: Path, *, force: bool = False) -> None:
+    """Block edits to archived cards unless --force is set.
+
+    Raises typer.Exit(1) if the card is archived and force is False.
+    Prints a warning if force is True.
+    """
+    from trache.cache.working import read_working_card
+
+    try:
+        card = read_working_card(identifier, cache_dir)
+        if card.closed:
+            if force:
+                console.print(
+                    f"[yellow]Warning: card [{card.uid6}] is archived — "
+                    f"proceeding due to --force.[/yellow]"
+                )
+            else:
+                console.print(
+                    f"[red]Card [{card.uid6}] is archived. "
+                    f"Use --force to edit archived cards.[/red]"
+                )
+                raise typer.Exit(1)
+    except (KeyError, FileNotFoundError):
+        pass  # Card not found — let the actual command handle the error

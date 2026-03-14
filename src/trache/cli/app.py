@@ -7,6 +7,7 @@ from typing import Optional
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 
 from trache import __version__
 from trache.cli.card import card_app
@@ -109,7 +110,7 @@ def pull(
         with client:
             if card:
                 result = pull_card(card, config, client, cache_dir, force=force)
-                console.print(f"[green]Pulled card: {result.title} [{result.uid6}][/green]")
+                console.print(f"[green]Pulled card: {escape(result.title)} [{result.uid6}][/green]")
             elif list_name:
                 cards = pull_list(list_name, config, client, cache_dir, force=force)
                 # Resolve display name: if user passed a raw ID, look up the name
@@ -120,11 +121,15 @@ def pull(
                 else:
                     display_name = list_name
                 console.print(
-                    f'[green]Pulled {len(cards)} cards from list "{display_name}"[/green]'
+                    f'[green]Pulled {len(cards)} cards from list "{escape(display_name)}"[/green]'
                 )
             else:
-                count = pull_full_board(config, client, cache_dir, force=force)
-                console.print(f"[green]Pulled {count} cards[/green]")
+                result = pull_full_board(config, client, cache_dir, force=force)
+                console.print(
+                    f"[green]Pulled {escape(result.board_name)}: "
+                    f"{result.cards} cards, {result.lists} lists, "
+                    f"{result.labels} labels, {result.checklists} checklists[/green]"
+                )
     except RuntimeError as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(1)
@@ -149,7 +154,8 @@ def status() -> None:
     if changeset.added:
         console.print(f"[green]  Added: {len(changeset.added)}[/green]")
         for c in changeset.added:
-            console.print(f"    + {c.title}")
+            suffix = f" ({', '.join(c.annotations)})" if c.annotations else ""
+            console.print(f"    + {escape(c.title)}{suffix}")
 
     if changeset.modified:
         console.print(f"[yellow]  Modified: {len(changeset.modified)}[/yellow]")
@@ -186,38 +192,42 @@ def push(
     client, config = _get_client()
     cache_dir = Path(".trache")
 
+    def _progress(current: int, total: int, desc: str) -> None:
+        console.print(f"[dim]  [{current}/{total}] {desc}[/dim]")
+
     try:
         with client:
             changeset, result = push_changes(
-                config, client, cache_dir, dry_run=dry_run, card_filter=card
+                config, client, cache_dir, dry_run=dry_run, card_filter=card,
+                on_progress=_progress,
             )
     except KeyError as e:
         msg = e.args[0] if e.args else "Requested item not found"
         console.print(f"[red]{msg}[/red]")
         raise typer.Exit(1)
 
-    if dry_run:
-        console.print("[yellow]Dry run — no changes pushed[/yellow]")
-
     if changeset.is_empty:
         console.print("Nothing to push.")
         return
 
-    if result.pushed:
-        console.print(f"[green]Pushed: {len(result.pushed)}[/green]")
-    if result.created:
-        # Separate regular creates from pushed-and-archived cards
-        regular = [c for c in result.created if not c.startswith("pushed_and_archived:")]
-        archived_new = [c for c in result.created if c.startswith("pushed_and_archived:")]
-        if regular:
-            console.print(f"[green]Created: {len(regular)}[/green]")
-        for entry in archived_new:
-            _, uid6, title = entry.split(":", 2)
-            console.print(
-                f"[green]Card {uid6} ({title}) successfully pushed and archived.[/green]"
-            )
-    if result.archived:
-        console.print(f"[yellow]Archived: {len(result.archived)}[/yellow]")
+    if dry_run:
+        console.print("[yellow]Dry run — would push:[/yellow]")
+    else:
+        console.print(
+            f"[green]Pushed {result.total} "
+            f"change{'s' if result.total != 1 else ''}:[/green]"
+        )
+
+    for entry in result.pushed:
+        fields = f" ({', '.join(entry.fields)})" if entry.fields else ""
+        console.print(f"  ~ {escape(entry.title)} [{entry.uid6}]{fields}")
+    for entry in result.created:
+        id_info = f"{entry.old_uid6} → {entry.uid6}" if not dry_run else entry.uid6
+        suffix = " (archived)" if entry.also_archived else ""
+        console.print(f"  + {escape(entry.title)} [{id_info}]{suffix}")
+    for entry in result.archived:
+        console.print(f"  - {escape(entry.title)} [{entry.uid6}]")
+
     if result.errors:
         for err in result.errors:
             console.print(f"[red]Error: {err}[/red]")
@@ -250,8 +260,12 @@ def sync(
 
         # Only full pull if no errors
         if not dry_run:
-            count = pull_full_board(config, client, cache_dir, force=True)
-            console.print(f"[green]Pulled {count} cards[/green]")
+            result = pull_full_board(config, client, cache_dir, force=True)
+            console.print(
+                f"[green]Pulled {result.board_name}: "
+                f"{result.cards} cards, {result.lists} lists, "
+                f"{result.labels} labels, {result.checklists} checklists[/green]"
+            )
         else:
             console.print("[yellow]Dry run — skipping pull[/yellow]")
 
