@@ -40,6 +40,7 @@ class SyncState(BaseModel):
     """Sync metadata stored in .trache/state.json."""
 
     last_pull: Optional[str] = None
+    board_last_activity: Optional[str] = None
     card_timestamps: dict[str, str] = Field(default_factory=dict)
 
     @classmethod

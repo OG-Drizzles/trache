@@ -125,11 +125,14 @@ def pull(
                 )
             else:
                 result = pull_full_board(config, client, cache_dir, force=force)
-                console.print(
-                    f"[green]Pulled {escape(result.board_name)}: "
-                    f"{result.cards} cards, {result.lists} lists, "
-                    f"{result.labels} labels, {result.checklists} checklists[/green]"
-                )
+                if result is None:
+                    console.print("Already up to date.")
+                else:
+                    console.print(
+                        f"[green]Pulled {escape(result.board_name)}: "
+                        f"{result.cards} cards, {result.lists} lists, "
+                        f"{result.labels} labels, {result.checklists} checklists[/green]"
+                    )
     except RuntimeError as e:
         console.print(f"[red]{e}[/red]")
         raise typer.Exit(1)
@@ -284,11 +287,14 @@ def sync(
                 )
             else:
                 pull_result = pull_full_board(config, client, cache_dir, force=True)
-                console.print(
-                    f"[green]Pulled {escape(pull_result.board_name)}: "
-                    f"{pull_result.cards} cards, {pull_result.lists} lists, "
-                    f"{pull_result.labels} labels, {pull_result.checklists} checklists[/green]"
-                )
+                if pull_result is None:
+                    console.print("Already up to date.")
+                else:
+                    console.print(
+                        f"[green]Pulled {escape(pull_result.board_name)}: "
+                        f"{pull_result.cards} cards, {pull_result.lists} lists, "
+                        f"{pull_result.labels} labels, {pull_result.checklists} checklists[/green]"
+                    )
         else:
             console.print("[yellow]Dry run — skipping pull[/yellow]")
 

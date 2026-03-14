@@ -26,6 +26,7 @@ def list_cards(
     list_name: Optional[str] = typer.Option(
         None, "--list", "-l", help="Filter by list (ID or name)"
     ),
+    raw: bool = typer.Option(False, "--raw", help="Tab-separated output"),
 ) -> None:
     """List cards from local index (no API call)."""
     from trache.cache.index import load_index, resolve_list_id
@@ -41,6 +42,14 @@ def list_cards(
     filter_list_id = None
     if list_name:
         filter_list_id = resolve_list_id(list_name, index_dir)
+
+    if raw:
+        for card_id, info in cards_index.items():
+            if filter_list_id and info["list_id"] != filter_list_id:
+                continue
+            list_display = list_names.get(info["list_id"], info["list_id"][:8])
+            print(f"{info['uid6']}\t{list_display}\t{info['title']}")
+        return
 
     table = Table(show_header=True, header_style="bold")
     table.add_column("UID6", style="cyan", width=8)
@@ -60,12 +69,22 @@ def list_cards(
 @handle_resolve_errors
 def show_card(
     identifier: str = typer.Argument(help="Card ID or UID6"),
+    raw: bool = typer.Option(False, "--raw", help="Print working file verbatim"),
 ) -> None:
     """Show a single card (loads one .md file, no API call)."""
     from trache.cache.index import resolve_list_name
     from trache.cache.working import read_working_card
 
     cache_dir = _cache_dir()
+
+    if raw:
+        from trache.cache.index import resolve_card_id
+
+        card_id = resolve_card_id(identifier, cache_dir / "indexes")
+        md_path = cache_dir / "working" / "cards" / f"{card_id}.md"
+        print(md_path.read_text(), end="")
+        return
+
     card = read_working_card(identifier, cache_dir)
 
     # Title (truncate pathological lengths)

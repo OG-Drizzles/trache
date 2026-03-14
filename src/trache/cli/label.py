@@ -37,7 +37,9 @@ def _save_labels(labels: list[dict]) -> None:
 
 
 @label_app.command("list")
-def list_labels() -> None:
+def list_labels(
+    raw: bool = typer.Option(False, "--raw", help="Tab-separated output"),
+) -> None:
     """List board labels (reads local cache, no API call)."""
     labels_path = _labels_path()
 
@@ -48,7 +50,16 @@ def list_labels() -> None:
     labels = json.loads(labels_path.read_text())
 
     if not labels:
-        console.print("[dim]No labels on this board.[/dim]")
+        if not raw:
+            console.print("[dim]No labels on this board.[/dim]")
+        return
+
+    if raw:
+        for lbl in labels:
+            name = lbl.get("name", "")
+            color = lbl.get("color", "")
+            if name:
+                print(f"{name}\t{color}")
         return
 
     table = Table(show_header=True, header_style="bold")

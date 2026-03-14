@@ -31,7 +31,9 @@ def _get_client_and_config():
 
 
 @list_app.command("show")
-def show_lists() -> None:
+def show_lists(
+    raw: bool = typer.Option(False, "--raw", help="Tab-separated output"),
+) -> None:
     """List all board lists (reads local index, no API call)."""
     from trache.cache.index import load_index
 
@@ -51,6 +53,12 @@ def show_lists() -> None:
 
     # Sort by position
     sorted_lists = sorted(lists_index.items(), key=lambda x: x[1].get("pos", 0))
+
+    if raw:
+        for list_id, info in sorted_lists:
+            count = cards_per_list.get(list_id, 0)
+            print(f"{info['name']}\t{count}")
+        return
 
     table = Table(show_header=True, header_style="bold")
     table.add_column("List", style="cyan")

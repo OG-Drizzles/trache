@@ -84,12 +84,21 @@ def create(
 @handle_resolve_errors
 def show(
     card_identifier: str = typer.Argument(help="Card ID or UID6"),
+    raw: bool = typer.Option(False, "--raw", help="Tab-separated output"),
 ) -> None:
     """Show checklists for a card."""
     _card_id, checklists = _load_checklists_for_card(card_identifier)
 
     if not checklists:
-        console.print("[dim]No checklists[/dim]")
+        if not raw:
+            console.print("[dim]No checklists[/dim]")
+        return
+
+    if raw:
+        for cl in checklists:
+            print(f"# {cl['name']}")
+            for item in cl.get("items", []):
+                print(f"{item['id']}\t{item['state']}\t{item['name']}")
         return
 
     for cl in checklists:

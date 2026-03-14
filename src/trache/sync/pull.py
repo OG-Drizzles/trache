@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 from trache.api.client import TrelloClient
 from trache.cache.diff import _fields_equal
@@ -41,7 +42,7 @@ def _check_dirty_state(cache_dir: Path, force: bool) -> None:
 
 def pull_full_board(
     config: TracheConfig, client: TrelloClient, cache_dir: Path, *, force: bool = False
-) -> PullResult:
+) -> Optional[PullResult]:
     """Pull entire board: lists, cards, checklists → clean + working + indexes.
 
     Returns a PullResult with counts for display.
@@ -50,8 +51,19 @@ def pull_full_board(
     _check_dirty_state(cache_dir, force)
     board_id = config.board_id
 
-    # Fetch all data
+    # Fetch board metadata (cheap call)
     board = client.get_board(board_id)
+
+    # Stale check: skip full pull if board hasn't changed
+    if not force and board.date_last_activity is not None:
+        state = SyncState.load(cache_dir)
+        if (
+            state.board_last_activity is not None
+            and state.board_last_activity == board.date_last_activity.isoformat()
+        ):
+            return None  # Already up to date
+
+    # Fetch all data
     lists = client.get_board_lists(board_id)
     cards = client.get_board_cards(board_id)
     checklists = client.get_board_checklists(board_id)
@@ -109,6 +121,9 @@ def pull_full_board(
     # Update sync state
     state = SyncState(
         last_pull=datetime.now(timezone.utc).isoformat(),
+        board_last_activity=(
+            board.date_last_activity.isoformat() if board.date_last_activity else None
+        ),
         card_timestamps={
             c.id: c.last_activity.isoformat() if c.last_activity else ""
             for c in cards

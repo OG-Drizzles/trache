@@ -84,6 +84,7 @@ class Board(BaseModel):
     id: str
     name: str
     url: str = ""
+    date_last_activity: Optional[datetime] = None
     lists: list[TrelloList] = Field(default_factory=list)
     labels: list[Label] = Field(default_factory=list)
 

@@ -62,8 +62,13 @@ class TrelloClient:
     # --- Board ---
 
     def get_board(self, board_id: str) -> Board:
-        data = self._get(f"/boards/{board_id}", {"fields": "name,url"})
-        return Board(id=data["id"], name=data["name"], url=data.get("url", ""))
+        data = self._get(f"/boards/{board_id}", {"fields": "name,url,dateLastActivity"})
+        return Board(
+            id=data["id"],
+            name=data["name"],
+            url=data.get("url", ""),
+            date_last_activity=_parse_trello_date(data.get("dateLastActivity")),
+        )
 
     def get_board_lists(self, board_id: str) -> list[TrelloList]:
         data = self._get(f"/boards/{board_id}/lists", {"filter": "open"})
