@@ -1,4 +1,4 @@
-"""Checklist subcommands: show, check, uncheck, add-item, remove-item."""
+"""Checklist subcommands: show, check, uncheck, add-item, remove-item, create."""
 
 from __future__ import annotations
 
@@ -53,6 +53,31 @@ def _update_card_content_modified_at(card_id: str) -> None:
         card.content_modified_at = datetime.now(timezone.utc)
         card.dirty = True
         write_card_file(card, cache_dir / "working" / "cards")
+
+
+@checklist_app.command("create")
+@handle_resolve_errors
+def create(
+    card_identifier: str = typer.Argument(help="Card ID or UID6"),
+    name: str = typer.Argument(help="Checklist name"),
+    force: bool = typer.Option(False, "--force", help="Allow editing archived cards"),
+) -> None:
+    """Create a new checklist on a card (local-first, push to sync)."""
+    guard_archived(card_identifier, _cache_dir(), force=force)
+    card_id, checklists = _load_checklists_for_card(card_identifier)
+
+    # Check for duplicate name
+    for cl in checklists:
+        if cl["name"] == name:
+            console.print(f"[red]Checklist '{name}' already exists on this card[/red]")
+            raise typer.Exit(1)
+
+    temp_id = f"temp_{uuid4().hex[:14]}t~"
+    checklists.append({"id": temp_id, "name": name, "items": []})
+
+    _save_checklists_for_card(card_id, checklists)
+    _update_card_content_modified_at(card_id)
+    console.print(f"[green]Checklist created: {name} ({temp_id}) — push to sync[/green]")
 
 
 @checklist_app.command("show")

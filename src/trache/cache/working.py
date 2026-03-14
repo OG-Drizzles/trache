@@ -126,7 +126,7 @@ def _validate_label(label_name: str, cache_dir: Path) -> None:
         f"Label '{label_name}' does not exist on this board. "
         f"Valid labels: {valid_names}. "
         f"Use `trache label list` to see all labels. "
-        f"To add a new label, create it in Trello then run `trache pull` to refresh."
+        f"Use `trache label create` to add a new label."
     )
 
 

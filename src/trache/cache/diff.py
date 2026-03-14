@@ -16,10 +16,20 @@ class ChecklistChange:
 
     checklist_id: str
     checklist_name: str
-    change_type: str  # "state_change" | "new_item" | "removed_item" | "text_change"
+    change_type: str  # "state_change" | "new_item" | "removed_item" | "text_change" | "new_checklist"
     item_id: str = ""
     old_value: str = ""
     new_value: str = ""
+
+
+@dataclass
+class LabelChange:
+    """A board-level label change."""
+
+    label_name: str
+    label_color: str | None
+    change_type: str  # "created" | "deleted"
+    label_id: str = ""
 
 
 @dataclass
@@ -41,14 +51,15 @@ class Changeset:
     modified: list[CardChange] = field(default_factory=list)
     added: list[CardChange] = field(default_factory=list)
     deleted: list[CardChange] = field(default_factory=list)
+    label_changes: list[LabelChange] = field(default_factory=list)
 
     @property
     def is_empty(self) -> bool:
-        return not self.modified and not self.added and not self.deleted
+        return not self.modified and not self.added and not self.deleted and not self.label_changes
 
     @property
     def total_changes(self) -> int:
-        return len(self.modified) + len(self.added) + len(self.deleted)
+        return len(self.modified) + len(self.added) + len(self.deleted) + len(self.label_changes)
 
 
 # Fields to compare for detecting modifications
@@ -99,6 +110,14 @@ def _compute_checklist_changes(
         old_items = clean_items.get(cl_id, {})
         new_items = working_items.get(cl_id, {})
 
+        # Detect entirely new checklists
+        if cl_id not in clean_items and cl_id in working_items:
+            changes.append(ChecklistChange(
+                checklist_id=cl_id,
+                checklist_name=cl_name,
+                change_type="new_checklist",
+            ))
+
         # Removed items
         for item_id in set(old_items) - set(new_items):
             changes.append(ChecklistChange(
@@ -141,6 +160,42 @@ def _compute_checklist_changes(
                     old_value=old["name"],
                     new_value=new["name"],
                 ))
+
+    return changes
+
+
+def _compute_label_changes(cache_dir: Path) -> list[LabelChange]:
+    """Compare clean vs working labels.json to find created/deleted labels."""
+    clean_path = cache_dir / "clean" / "labels.json"
+    working_path = cache_dir / "working" / "labels.json"
+
+    clean_labels = json.loads(clean_path.read_text()) if clean_path.exists() else []
+    working_labels = json.loads(working_path.read_text()) if working_path.exists() else []
+
+    clean_by_id = {lb["id"]: lb for lb in clean_labels}
+    working_by_id = {lb["id"]: lb for lb in working_labels}
+
+    changes: list[LabelChange] = []
+
+    # New labels (in working but not clean)
+    for lb_id in set(working_by_id) - set(clean_by_id):
+        lb = working_by_id[lb_id]
+        changes.append(LabelChange(
+            label_name=lb.get("name", ""),
+            label_color=lb.get("color"),
+            change_type="created",
+            label_id=lb_id,
+        ))
+
+    # Deleted labels (in clean but not working)
+    for lb_id in set(clean_by_id) - set(working_by_id):
+        lb = clean_by_id[lb_id]
+        changes.append(LabelChange(
+            label_name=lb.get("name", ""),
+            label_color=lb.get("color"),
+            change_type="deleted",
+            label_id=lb_id,
+        ))
 
     return changes
 
@@ -214,6 +269,9 @@ def compute_diff(cache_dir: Path) -> Changeset:
                 checklist_changes=cl_changes,
             ))
 
+    # Compute label changes
+    changeset.label_changes = _compute_label_changes(cache_dir)
+
     # Sort all lists for deterministic output
     changeset.added.sort(key=lambda c: c.title)
     changeset.modified.sort(key=lambda c: c.title)
@@ -257,7 +315,11 @@ def format_diff(changeset: Changeset) -> str:
                     new_short = _truncate(new, 60)
                     lines.append(f"    {f}: {old_short} → {new_short}")
             for cl_change in c.checklist_changes:
-                if cl_change.change_type == "state_change":
+                if cl_change.change_type == "new_checklist":
+                    lines.append(
+                        f"    checklist + [{cl_change.checklist_name}] (new)"
+                    )
+                elif cl_change.change_type == "state_change":
                     lines.append(
                         f"    checklist [{cl_change.checklist_name}] "
                         f"item {cl_change.item_id}: "
@@ -286,6 +348,20 @@ def format_diff(changeset: Changeset) -> str:
         for c in changeset.deleted:
             lines.append(f"  - {c.title} [{c.card_id}]")
         lines.append("")
+
+    if changeset.label_changes:
+        created = [lc for lc in changeset.label_changes if lc.change_type == "created"]
+        deleted = [lc for lc in changeset.label_changes if lc.change_type == "deleted"]
+        if created:
+            lines.append(f"Labels created ({len(created)}):")
+            for lc in created:
+                lines.append(f"  + {lc.label_name} ({lc.label_color or 'no color'})")
+            lines.append("")
+        if deleted:
+            lines.append(f"Labels deleted ({len(deleted)}):")
+            for lc in deleted:
+                lines.append(f"  - {lc.label_name}")
+            lines.append("")
 
     return "\n".join(lines)
 

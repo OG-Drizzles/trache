@@ -103,6 +103,7 @@ class TestLabelOnlyPushNoRedundantDesc:
             {"id": "lbl1", "name": "bug", "color": "red"},
             {"id": "lbl2", "name": "feature", "color": "blue"},
         ]
+        (cache_dir / "clean" / "labels.json").write_text(json.dumps(labels_data, indent=2))
         (cache_dir / "working" / "labels.json").write_text(json.dumps(labels_data, indent=2))
 
         # Change only labels in working copy

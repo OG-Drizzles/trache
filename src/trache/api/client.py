@@ -55,6 +55,10 @@ class TrelloClient:
         resp.raise_for_status()
         return resp.json()
 
+    def _delete(self, path: str) -> None:
+        resp = self._client.delete(path, params=self._auth.query_params)
+        resp.raise_for_status()
+
     # --- Board ---
 
     def get_board(self, board_id: str) -> Board:
@@ -152,6 +156,23 @@ class TrelloClient:
             created_at=_parse_trello_date(data.get("date")),
         )
 
+    def update_comment(self, card_id: str, comment_id: str, text: str) -> Comment:
+        """Update a comment's text."""
+        data = self._put(
+            f"/cards/{card_id}/actions/{comment_id}/comments",
+            {"text": text},
+        )
+        return Comment(
+            id=data["id"],
+            card_id=card_id,
+            text=text,
+            created_at=_parse_trello_date(data.get("date")),
+        )
+
+    def delete_comment(self, card_id: str, comment_id: str) -> None:
+        """Delete a comment."""
+        self._delete(f"/cards/{card_id}/actions/{comment_id}/comments")
+
     # --- Checklist ---
 
     def update_checklist_item(
@@ -173,12 +194,7 @@ class TrelloClient:
 
     def delete_checklist_item(self, checklist_id: str, check_item_id: str) -> None:
         """Delete a checklist item."""
-        params = self._auth.query_params
-        resp = self._client.delete(
-            f"/checklists/{checklist_id}/checkItems/{check_item_id}",
-            params=params,
-        )
-        resp.raise_for_status()
+        self._delete(f"/checklists/{checklist_id}/checkItems/{check_item_id}")
 
     def add_checklist_item(self, checklist_id: str, name: str) -> ChecklistItem:
         data = self._post(f"/checklists/{checklist_id}/checkItems", {"name": name})
@@ -188,6 +204,25 @@ class TrelloClient:
             state=data.get("state", "incomplete"),
             pos=data.get("pos", 0),
         )
+
+    def create_checklist(self, card_id: str, name: str) -> Checklist:
+        """Create a new checklist on a card."""
+        data = self._post("/checklists", {"idCard": card_id, "name": name})
+        return self._parse_checklist(data)
+
+    # --- Labels ---
+
+    def create_label(self, board_id: str, name: str, color: Optional[str] = None) -> Label:
+        """Create a new board label."""
+        payload: dict[str, Any] = {"name": name, "idBoard": board_id}
+        if color:
+            payload["color"] = color
+        data = self._post("/labels", payload)
+        return Label(id=data["id"], name=data.get("name", ""), color=data.get("color"))
+
+    def delete_label(self, label_id: str) -> None:
+        """Delete a board label."""
+        self._delete(f"/labels/{label_id}")
 
     # --- Parsers ---
 

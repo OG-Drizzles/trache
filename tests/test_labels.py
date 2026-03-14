@@ -107,11 +107,12 @@ class TestLabelPush:
         config = TracheConfig(board_id="board1")
         config.save(cache_dir)
 
-        # Write labels.json
+        # Write labels.json (both clean and working so labels aren't detected as new)
         labels_data = [
             {"id": "lbl1", "name": "bug", "color": "red"},
             {"id": "lbl2", "name": "feature", "color": "blue"},
         ]
+        (cache_dir / "clean" / "labels.json").write_text(json.dumps(labels_data))
         (cache_dir / "working" / "labels.json").write_text(json.dumps(labels_data))
 
         # Clean has one label, working has two

@@ -168,6 +168,18 @@ def status() -> None:
         for c in changeset.deleted:
             console.print(f"    - {c.title}")
 
+    if changeset.label_changes:
+        created = [lc for lc in changeset.label_changes if lc.change_type == "created"]
+        deleted = [lc for lc in changeset.label_changes if lc.change_type == "deleted"]
+        if created:
+            console.print(f"[green]  Labels created: {len(created)}[/green]")
+            for lc in created:
+                console.print(f"    + {lc.label_name} ({lc.label_color or 'no color'})")
+        if deleted:
+            console.print(f"[red]  Labels deleted: {len(deleted)}[/red]")
+            for lc in deleted:
+                console.print(f"    - {lc.label_name}")
+
 
 @app.command()
 def diff() -> None:

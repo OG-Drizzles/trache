@@ -10,7 +10,7 @@ from typing import Callable, Optional
 from rich.console import Console
 
 from trache.api.client import TrelloClient
-from trache.cache.diff import CardChange, Changeset, ChecklistChange, compute_diff
+from trache.cache.diff import CardChange, Changeset, ChecklistChange, LabelChange, compute_diff
 from trache.cache.store import read_card_file
 from trache.config import SyncState, TracheConfig
 from trache.identity import generate_block, inject_block
@@ -91,6 +91,10 @@ def push_changes(
             continue
         all_changes.append(("deleted", change))
 
+    # Push label creates before card changes (so new labels are available for card assignments)
+    if not dry_run and not card_filter:
+        _push_label_creates(changeset.label_changes, client, config, cache_dir, result)
+
     total = len(all_changes)
 
     for idx, (kind, change) in enumerate(all_changes, 1):
@@ -153,6 +157,10 @@ def push_changes(
                 result.archived.append(entry)
             except Exception as e:
                 result.errors.append(f"Failed to archive {change.card_id}: {e}")
+
+    # Push label deletes after card changes (cards should have labels removed first)
+    if not dry_run and not card_filter:
+        _push_label_deletes(changeset.label_changes, client, result)
 
     # Re-pull touched objects (not in dry-run)
     if not dry_run:
@@ -341,15 +349,70 @@ def _push_checklist_changes(
     cache_dir: Path,
 ) -> None:
     """Push checklist changes to Trello API."""
+    # Build temp→real ID mapping for newly created checklists
+    temp_to_real: dict[str, str] = {}
+
     for cl_change in changes:
-        if cl_change.change_type == "state_change":
+        if cl_change.change_type == "new_checklist":
+            new_cl = client.create_checklist(card_id, cl_change.checklist_name)
+            temp_to_real[cl_change.checklist_id] = new_cl.id
+        elif cl_change.change_type == "state_change":
             client.update_checklist_item(card_id, cl_change.item_id, cl_change.new_value)
         elif cl_change.change_type == "new_item":
-            client.add_checklist_item(cl_change.checklist_id, cl_change.new_value)
+            # Substitute real checklist ID if this item belongs to a newly created checklist
+            cl_id = temp_to_real.get(cl_change.checklist_id, cl_change.checklist_id)
+            client.add_checklist_item(cl_id, cl_change.new_value)
         elif cl_change.change_type == "removed_item":
             client.delete_checklist_item(cl_change.checklist_id, cl_change.item_id)
         elif cl_change.change_type == "text_change":
             client.update_checklist_item_name(card_id, cl_change.item_id, cl_change.new_value)
+
+
+def _push_label_creates(
+    label_changes: list[LabelChange],
+    client: TrelloClient,
+    config: TracheConfig,
+    cache_dir: Path,
+    result: PushResult,
+) -> None:
+    """Push label creates to Trello API. Updates working/labels.json with real IDs."""
+    creates = [lc for lc in label_changes if lc.change_type == "created"]
+    if not creates:
+        return
+
+    labels_path = cache_dir / "working" / "labels.json"
+    labels_data = json.loads(labels_path.read_text()) if labels_path.exists() else []
+
+    for lc in creates:
+        try:
+            new_label = client.create_label(config.board_id, lc.label_name, lc.label_color)
+            # Replace temp ID with real ID in working/labels.json
+            for lb in labels_data:
+                if lb["id"] == lc.label_id:
+                    lb["id"] = new_label.id
+                    break
+            _console.print(
+                f"[green]  Label created: {lc.label_name} [{new_label.id[-6:].upper()}][/green]"
+            )
+        except Exception as e:
+            result.errors.append(f"Failed to create label '{lc.label_name}': {e}")
+
+    labels_path.write_text(json.dumps(labels_data, indent=2) + "\n")
+
+
+def _push_label_deletes(
+    label_changes: list[LabelChange],
+    client: TrelloClient,
+    result: PushResult,
+) -> None:
+    """Push label deletes to Trello API."""
+    deletes = [lc for lc in label_changes if lc.change_type == "deleted"]
+    for lc in deletes:
+        try:
+            client.delete_label(lc.label_id)
+            _console.print(f"[yellow]  Label deleted: {lc.label_name}[/yellow]")
+        except Exception as e:
+            result.errors.append(f"Failed to delete label '{lc.label_name}': {e}")
 
 
 def _resolve_label_ids(label_names: list[str], cache_dir: Path) -> list[str]:
