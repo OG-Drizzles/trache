@@ -21,5 +21,8 @@ def handle_resolve_errors(func):
             msg = e.args[0] if e.args else "Requested item not found"
             console.print(f"[red]{msg}[/red]")
             raise typer.Exit(1)
+        except ValueError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1)
 
     return wrapper

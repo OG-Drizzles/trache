@@ -186,10 +186,15 @@ def push(
     client, config = _get_client()
     cache_dir = Path(".trache")
 
-    with client:
-        changeset, result = push_changes(
-            config, client, cache_dir, dry_run=dry_run, card_filter=card
-        )
+    try:
+        with client:
+            changeset, result = push_changes(
+                config, client, cache_dir, dry_run=dry_run, card_filter=card
+            )
+    except KeyError as e:
+        msg = e.args[0] if e.args else "Requested item not found"
+        console.print(f"[red]{msg}[/red]")
+        raise typer.Exit(1)
 
     if dry_run:
         console.print("[yellow]Dry run — no changes pushed[/yellow]")
@@ -201,12 +206,22 @@ def push(
     if result.pushed:
         console.print(f"[green]Pushed: {len(result.pushed)}[/green]")
     if result.created:
-        console.print(f"[green]Created: {len(result.created)}[/green]")
+        # Separate regular creates from pushed-and-archived cards
+        regular = [c for c in result.created if not c.startswith("pushed_and_archived:")]
+        archived_new = [c for c in result.created if c.startswith("pushed_and_archived:")]
+        if regular:
+            console.print(f"[green]Created: {len(regular)}[/green]")
+        for entry in archived_new:
+            _, uid6, title = entry.split(":", 2)
+            console.print(
+                f"[green]Card {uid6} ({title}) successfully pushed and archived.[/green]"
+            )
     if result.archived:
         console.print(f"[yellow]Archived: {len(result.archived)}[/yellow]")
     if result.errors:
         for err in result.errors:
             console.print(f"[red]Error: {err}[/red]")
+        raise typer.Exit(1)
 
 
 @app.command()

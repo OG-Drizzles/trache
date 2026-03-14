@@ -43,6 +43,15 @@ def push_changes(
     changeset = compute_diff(cache_dir)
     result = PushResult()
 
+    # Validate card filter up front to give a clear error
+    if card_filter:
+        from trache.cache.index import resolve_card_id
+
+        try:
+            resolve_card_id(card_filter, cache_dir / "indexes")
+        except KeyError:
+            raise KeyError(f"Cannot resolve card identifier: {card_filter}")
+
     if changeset.is_empty:
         return changeset, result
 
@@ -67,8 +76,11 @@ def push_changes(
             result.created.append(change.card_id)
             continue
         try:
-            _push_new_card(change, working_dir, client, config, cache_dir)
-            result.created.append(change.card_id)
+            status = _push_new_card(change, working_dir, client, config, cache_dir)
+            if status.startswith("pushed_and_archived:"):
+                result.created.append(status)
+            else:
+                result.created.append(change.card_id)
         except Exception as e:
             result.errors.append(f"Failed to create {change.card_id}: {e}")
 
@@ -175,11 +187,11 @@ def _push_new_card(
     client: TrelloClient,
     config: TracheConfig,
     cache_dir: Path,
-) -> None:
-    """Create a new card on Trello."""
+) -> str:
+    """Create a new card on Trello. Returns status message."""
     card = read_card_file(working_dir / f"{change.card_id}.md")
 
-    # Inject identifier block (same contract as modified cards)
+    # Inject identifier block with temp UID (will be corrected below)
     block = generate_block(
         title=card.title,
         created_at=card.created_at,
@@ -191,13 +203,46 @@ def _push_new_card(
 
     new_card = client.create_card(card.list_id, card.title, desc_with_block)
 
-    # Clean up temp file and re-pull the real card
+    # Fix identifier block with real UID6 now that Trello assigned an ID
+    real_uid6 = new_card.id[-6:].upper()
+    corrected_block = generate_block(
+        title=card.title,
+        created_at=card.created_at,
+        content_modified_at=card.content_modified_at,
+        last_activity=card.last_activity,
+        uid6=real_uid6,
+    )
+    corrected_desc = inject_block(card.description, corrected_block)
+    client.update_card(new_card.id, {"desc": corrected_desc})
+
+    # Archive on Trello if the card was archived locally
+    was_archived = card.closed
+    if was_archived:
+        client.archive_card(new_card.id)
+
+    # Clean up temp files
     temp_file = working_dir / f"{change.card_id}.md"
     temp_file.unlink(missing_ok=True)
     clean_file = cache_dir / "clean" / "cards" / f"{change.card_id}.md"
     clean_file.unlink(missing_ok=True)
 
+    # Clean up temp checklist files
+    temp_cl = cache_dir / "working" / "checklists" / f"{change.card_id}.json"
+    temp_cl.unlink(missing_ok=True)
+    clean_cl = cache_dir / "clean" / "checklists" / f"{change.card_id}.json"
+    clean_cl.unlink(missing_ok=True)
+
+    # Clean up temp card from index
+    from trache.cache.index import remove_card_from_index
+
+    remove_card_from_index(change.card_id, cache_dir / "indexes")
+
+    # Re-pull the real card to reconcile
     pull_card(new_card.id, config, client, cache_dir, force=True)
+
+    if was_archived:
+        return f"pushed_and_archived:{real_uid6}:{card.title}"
+    return f"created:{real_uid6}:{card.title}"
 
 
 def _push_checklist_changes(

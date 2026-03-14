@@ -19,6 +19,21 @@ def _cache_dir() -> Path:
     return Path(".trache")
 
 
+def _warn_if_archived(identifier: str) -> None:
+    """Print a warning if the card is archived. Does not block the operation."""
+    from trache.cache.working import read_working_card
+
+    try:
+        card = read_working_card(identifier, _cache_dir())
+        if card.closed:
+            console.print(
+                f"[yellow]Warning: card [{card.uid6}] is archived. "
+                f"Editing an archived card may have no effect on Trello.[/yellow]"
+            )
+    except (KeyError, FileNotFoundError):
+        pass  # Card not found — let the actual command handle the error
+
+
 @card_app.command("list")
 @handle_resolve_errors
 def list_cards(
@@ -115,6 +130,7 @@ def edit_title(
     """Edit card title in working copy."""
     from trache.cache.working import edit_title as _edit_title
 
+    _warn_if_archived(identifier)
     card = _edit_title(identifier, title, _cache_dir())
     console.print(f"[green]Title updated: {card.title} [{card.uid6}][/green]")
 
@@ -128,6 +144,7 @@ def edit_desc(
     """Edit card description in working copy."""
     from trache.cache.working import edit_description
 
+    _warn_if_archived(identifier)
     card = edit_description(identifier, desc, _cache_dir())
     console.print(f"[green]Description updated: {card.title} [{card.uid6}][/green]")
 
@@ -142,6 +159,7 @@ def move(
     from trache.cache.index import resolve_list_name
     from trache.cache.working import move_card
 
+    _warn_if_archived(identifier)
     cache_dir = _cache_dir()
     card = move_card(identifier, list_target, cache_dir)
     list_display = resolve_list_name(card.list_id, cache_dir / "indexes")
@@ -187,6 +205,7 @@ def add_label_cmd(
     """Add a label to a card in working copy."""
     from trache.cache.working import add_label
 
+    _warn_if_archived(identifier)
     card, added = add_label(identifier, label, _cache_dir())
     if added:
         console.print(f"[green]Label '{label}' added to {card.title} [{card.uid6}][/green]")
@@ -203,6 +222,7 @@ def remove_label_cmd(
     """Remove a label from a card in working copy."""
     from trache.cache.working import remove_label
 
+    _warn_if_archived(identifier)
     try:
         card = remove_label(identifier, label, _cache_dir())
         console.print(

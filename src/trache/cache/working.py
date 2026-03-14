@@ -107,11 +107,36 @@ def archive_card(identifier: str, cache_dir: Path) -> Card:
     return card
 
 
+def _validate_label(label_name: str, cache_dir: Path) -> None:
+    """Validate that a label name exists on the board. Raises ValueError if not."""
+    import json
+
+    labels_path = cache_dir / "working" / "labels.json"
+    if not labels_path.exists():
+        return  # No labels cache — skip validation (pre-pull state)
+
+    labels_data = json.loads(labels_path.read_text())
+    valid_names = [lb["name"] for lb in labels_data if lb.get("name")]
+    valid_colors = list({lb["color"] for lb in labels_data if lb.get("color")})
+
+    if label_name in valid_names or label_name in valid_colors:
+        return
+
+    raise ValueError(
+        f"Label '{label_name}' does not exist on this board. "
+        f"Valid labels: {valid_names}. "
+        f"Use `trache label list` to see all labels. "
+        f"To add a new label, create it in Trello then run `trache pull` to refresh."
+    )
+
+
 def add_label(identifier: str, label_name: str, cache_dir: Path) -> tuple[Card, bool]:
     """Add a label to a card in the working copy. Idempotent.
 
     Returns (card, added) where added is False if label was already present.
+    Raises ValueError if the label doesn't exist on the board.
     """
+    _validate_label(label_name, cache_dir)
     card = read_working_card(identifier, cache_dir)
     if label_name in card.labels:
         return card, False

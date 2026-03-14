@@ -23,7 +23,7 @@ def _check_dirty_state(cache_dir: Path, force: bool) -> None:
     changeset = compute_diff(cache_dir)
     if not changeset.is_empty and not force:
         raise RuntimeError(
-            "Working copy has unpushed changes. Push first or pass force=True."
+            "Working copy has unpushed changes. Push first or use --force to override."
         )
 
 
@@ -123,7 +123,17 @@ def pull_card(
     from trache.cache.index import resolve_card_id
 
     card_id = resolve_card_id(card_identifier, cache_dir / "indexes")
-    card = client.get_card(card_id)
+    try:
+        card = client.get_card(card_id)
+    except Exception as e:
+        # Handle 404 (deleted remote card) gracefully
+        err_str = str(e)
+        if "404" in err_str or "not found" in err_str.lower():
+            raise KeyError(
+                f"Card {card_identifier} not found on Trello (may have been deleted). "
+                f"Use `trache pull` to refresh the full board."
+            )
+        raise
     card.description = strip_block(card.description)
 
     # Fetch checklists for this card
@@ -140,11 +150,17 @@ def pull_card(
     # Write per-card checklist files
     _write_per_card_checklists(checklists, cache_dir)
 
-    # Rebuild indexes (incremental would be better but full rebuild is safe)
-    from trache.cache.store import list_card_files, read_card_file
+    # If card is archived/closed, remove from index so it doesn't appear in card list
+    if card.closed:
+        from trache.cache.index import remove_card_from_index
 
-    all_cards = [read_card_file(p) for p in list_card_files(cache_dir / "clean" / "cards")]
-    build_card_indexes(all_cards, cache_dir / "indexes")
+        remove_card_from_index(card_id, cache_dir / "indexes")
+    else:
+        # Rebuild indexes (incremental would be better but full rebuild is safe)
+        from trache.cache.store import list_card_files, read_card_file
+
+        all_cards = [read_card_file(p) for p in list_card_files(cache_dir / "clean" / "cards")]
+        build_card_indexes(all_cards, cache_dir / "indexes")
 
     return card
 

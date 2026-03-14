@@ -197,11 +197,21 @@ def resolve_list_id(identifier: str, index_dir: Path) -> str:
     if len(identifier) == 24:
         return identifier
 
-    # Try name lookup
+    # Try name lookup — collect all matches to detect ambiguity
     lists_index = load_index(index_dir, "lists_by_id")
+    matches: list[tuple[str, str]] = []  # (list_id, name)
     for list_id, info in lists_index.items():
         if info["name"].lower() == identifier.lower():
-            return list_id
+            matches.append((list_id, info["name"]))
+
+    if len(matches) == 1:
+        return matches[0][0]
+    if len(matches) > 1:
+        ids = ", ".join(f"{name} ({lid})" for lid, name in matches)
+        raise KeyError(
+            f"Ambiguous list name '{identifier}': matches {len(matches)} lists: {ids}. "
+            f"Use the full list ID instead."
+        )
 
     raise KeyError(f"Cannot resolve list identifier: {identifier}")
 
