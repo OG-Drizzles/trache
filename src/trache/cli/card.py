@@ -61,17 +61,37 @@ def show_card(
     identifier: str = typer.Argument(help="Card ID or UID6"),
 ) -> None:
     """Show a single card (loads one .md file, no API call)."""
+    from trache.cache.index import resolve_list_name
     from trache.cache.working import read_working_card
 
-    card = read_working_card(identifier, _cache_dir())
-    console.print(f"[bold]{card.title}[/bold]  [{card.uid6}]")
-    console.print(f"List: {card.list_id}")
+    cache_dir = _cache_dir()
+    card = read_working_card(identifier, cache_dir)
+
+    # Title (truncate pathological lengths)
+    if len(card.title) > 120:
+        title_display = card.title[:120] + f"… (len={len(card.title)})"
+    else:
+        title_display = card.title
+    console.print(f"[bold]{title_display}[/bold]  [{card.uid6}]")
+
+    # List name
+    list_name = resolve_list_name(card.list_id, cache_dir / "indexes")
+    console.print(f"List: {list_name}")
+
+    # Status line
+    status_parts = []
+    if card.closed:
+        status_parts.append("[red]ARCHIVED[/red]")
+    if card.dirty:
+        status_parts.append("[yellow]MODIFIED[/yellow]")
+    if not status_parts:
+        status_parts.append("[green]CLEAN[/green]")
+    console.print(f"Status: {' | '.join(status_parts)}")
+
     if card.labels:
         console.print(f"Labels: {', '.join(card.labels)}")
     if card.due:
         console.print(f"Due: {card.due}")
-    if card.dirty:
-        console.print("[yellow]* locally modified[/yellow]")
     console.print()
     if card.description:
         console.print(card.description)
@@ -80,7 +100,10 @@ def show_card(
     if card.checklists:
         console.print()
         for cl in card.checklists:
-            console.print(f"[bold]{cl.name}[/bold]: {cl.complete}/{cl.total}")
+            console.print(f"[bold]{cl.name}[/bold]: {cl.complete}/{cl.total} complete")
+            for item in cl.items:
+                check = "[x]" if item.state == "complete" else "[ ]"
+                console.print(f"  {check} {item.name} [dim]({item.id})[/dim]")
 
 
 @card_app.command("edit-title")
@@ -116,10 +139,13 @@ def move(
     list_target: str = typer.Argument(help="Target list (ID or name)"),
 ) -> None:
     """Move card to a different list in working copy."""
+    from trache.cache.index import resolve_list_name
     from trache.cache.working import move_card
 
-    card = move_card(identifier, list_target, _cache_dir())
-    console.print(f"[green]Moved {card.title} [{card.uid6}] to list {card.list_id}[/green]")
+    cache_dir = _cache_dir()
+    card = move_card(identifier, list_target, cache_dir)
+    list_display = resolve_list_name(card.list_id, cache_dir / "indexes")
+    console.print(f"[green]Moved {card.title} [{card.uid6}] to list {list_display}[/green]")
 
 
 @card_app.command("create")

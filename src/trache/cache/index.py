@@ -206,5 +206,14 @@ def resolve_list_id(identifier: str, index_dir: Path) -> str:
     raise KeyError(f"Cannot resolve list identifier: {identifier}")
 
 
+def resolve_list_name(list_id: str, index_dir: Path) -> str:
+    """Resolve a list ID to its human-readable name. Falls back to raw ID."""
+    lists_index = load_index(index_dir, "lists_by_id")
+    info = lists_index.get(list_id)
+    if info:
+        return info["name"]
+    return list_id
+
+
 def _write_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, indent=2, default=str) + "\n")

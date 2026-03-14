@@ -84,7 +84,7 @@ def init(
 
     from trache.cli.agents import print_init_agent_guidance
 
-    print_init_agent_guidance()
+    print_init_agent_guidance(board_name=getattr(config, "board_name", None))
 
 
 @app.command()
@@ -108,7 +108,16 @@ def pull(
                 console.print(f"[green]Pulled card: {result.title} [{result.uid6}][/green]")
             elif list_name:
                 cards = pull_list(list_name, config, client, cache_dir, force=force)
-                console.print(f"[green]Pulled {len(cards)} cards from list[/green]")
+                # Resolve display name: if user passed a raw ID, look up the name
+                from trache.cache.index import resolve_list_id, resolve_list_name
+
+                if len(list_name) == 24:
+                    display_name = resolve_list_name(list_name, cache_dir / "indexes")
+                else:
+                    display_name = list_name
+                console.print(
+                    f'[green]Pulled {len(cards)} cards from list "{display_name}"[/green]'
+                )
             else:
                 count = pull_full_board(config, client, cache_dir, force=force)
                 console.print(f"[green]Pulled {count} cards[/green]")
@@ -240,7 +249,16 @@ def agents(
     if reference:
         print_reference_block()
     else:
-        print_install_block()
+        # Try to load board name from config for context
+        board_name = None
+        try:
+            from trache.config import TracheConfig
+
+            cfg = TracheConfig.load()
+            board_name = getattr(cfg, "board_name", None)
+        except Exception:
+            pass
+        print_install_block(board_name=board_name)
 
 
 @app.command()

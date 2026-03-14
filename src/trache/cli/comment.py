@@ -64,6 +64,6 @@ def list_comments(
 
     for c in comments:
         date_str = c.created_at.strftime("%Y-%m-%d %H:%M") if c.created_at else "?"
-        console.print(f"[bold]{c.author}[/bold] ({date_str}):")
+        console.print(f"[bold]{c.author}[/bold] ({date_str}) [dim][{c.id}][/dim]:")
         console.print(f"  {c.text}")
         console.print()

@@ -5,29 +5,43 @@ from __future__ import annotations
 from rich.console import Console
 from rich.panel import Panel
 
-INSTALL_BLOCK = """\
-## Trache — Trello via local cache
+INSTALL_BLOCK_TEMPLATE = """\
+## Trache — Trello via local cache{board_line}
 
 Use `trache` for all Trello work. If trache can't do something, ask before using another method.
+User instructions always override this block.
 
-- Local-first: all edits happen locally, nothing hits the API until `trache push`
-- Prefer targeted operations (`--card <uid6>`, `--list "Name"`) over full-board pull
-- Only push / pull / sync when the user asks, unless told otherwise
-- Review changes with `trache status` and `trache diff` before syncing
-- Do not commit `.trache/` to git
-- For detailed command reference, run `trache agents --reference`
+**Default workflow:** `card list` → `card show` → edit locally → `status` / `diff` → `push`
+
+- **Local-first:** all reads are local (no API calls). All edits happen locally. Nothing hits the API until `trache push`.
+- **Pull refreshes from Trello** — only pull when the user asks, same as push and sync.
+- Prefer targeted operations (`--card <uid6>`, `--list "Name"`) over full-board pull/push.
+- Always review changes with `trache status` and `trache diff` before pushing.
+- Do not commit `.trache/` to git.
+- For the full command cheatsheet, run `trache agents --reference`.
 """
 
 REFERENCE_BLOCK = """\
-# trache command reference (on-demand, do not insert permanently)
+# trache command reference
+Ephemeral reference for the current task — do not copy into instruction files.
+User instructions always override this reference.
+
+**Default workflow:** `card list` → `card show` → edit locally → `status` / `diff` → `push`
+Prefer targeted operations (`--card <uid6>`, `--list "Name"`) over full-board pull/push.
 
 ## UID6
 Last 6 characters of a Trello card ID (uppercase). Used to reference cards in all commands. Input is case-insensitive.
+
+## Subcommands
+- `trache card` — list, show, edit-title, edit-desc, add-label, remove-label, move, create, archive
+- `trache checklist` — show, check, uncheck, add-item, remove-item
+- `trache comment` — add, list (**WARNING:** comment commands hit the API directly — they are NOT local-first)
 
 ## Discover
 trache card list                        # all cards
 trache card list --list "List Name"     # cards in one list
 trache card show <uid6>                 # full card detail
+trache checklist show <uid6>            # checklists for a card
 
 ## Mutate (local only)
 trache card edit-title <uid6> "New"     # change title
@@ -53,13 +67,9 @@ trache sync                             # push then full pull (use only when ful
 trache status                           # dirty state summary
 trache diff                             # detailed diff
 
-## Comments (hit API directly, not local-first)
-trache comment add <uid6> "text"
-trache comment list <uid6>
-
 ## Caveats
+- **Comments are NOT local-first** — `comment add` and `comment list` hit the Trello API immediately. Every other command is local until you push.
 - Dirty pull guard: `trache pull` refuses if local changes exist. Use --force to override.
-- Comment commands are NOT local-first; they hit the API immediately.
 - push = send local changes only. sync = push then full pull. Use sync only when a full refresh is actually wanted.
 
 ## Common workflows
@@ -76,6 +86,12 @@ Targeted refresh:
 Full refresh after push:
   trache sync
 """
+
+def render_install_block(board_name: str | None = None) -> str:
+    """Render the install block, optionally with board name."""
+    board_line = f"\nBoard: {board_name} (initialised)" if board_name else ""
+    return INSTALL_BLOCK_TEMPLATE.format(board_line=board_line)
+
 
 _PREAMBLE = (
     "[bold]Agent setup block[/bold]\n\n"
@@ -94,14 +110,14 @@ _COPY_START = "--- copy below this line ---"
 _COPY_END = "--- copy above this line ---"
 
 
-def print_install_block() -> None:
+def print_install_block(board_name: str | None = None) -> None:
     """Print preamble + install block with copy delimiters."""
     console = Console()
     console.print()
     console.print(Panel(_PREAMBLE, expand=False))
     console.print()
     console.print(_COPY_START)
-    console.print(INSTALL_BLOCK, end="")
+    console.print(render_install_block(board_name), end="")
     console.print(_COPY_END)
     console.print()
 
@@ -112,9 +128,11 @@ def print_reference_block() -> None:
     console.print(REFERENCE_BLOCK, end="")
 
 
-def print_init_agent_guidance() -> None:
-    """Print install block + human fallback note (for use at end of init)."""
-    print_install_block()
+def print_init_agent_guidance(board_name: str | None = None) -> None:
+    """Print install block + next-step hint + human fallback note (for use at end of init)."""
+    print_install_block(board_name)
     console = Console()
-    console.print(_HUMAN_NOTE)
+    console.print("[bold]Next:[/bold] run [bold]trache agents --reference[/bold] for the full command cheatsheet.")
+    console.print()
+    console.print(Panel(f"[dim]For manual setup:[/dim] {_HUMAN_NOTE}", expand=False))
     console.print()
