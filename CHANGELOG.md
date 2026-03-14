@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.1.6 — 2026-03-14
+
+Agent block improvements and CLI display polish.
+
+### Agent Block & Init
+
+- **Install block rewrite**: canonical workflow line, board context injection, "user instructions override" clause, read vs pull clarification
+- **Reference block tightened**: ephemeral header, subcommands section, elevated comment warning, default workflow line
+- **Init flow**: next-step hint pointing to `trache agents --reference`, labeled human note panel, board name passed through
+
+### CLI Display
+
+- **card show**: resolve list name, unified status line (ARCHIVED/MODIFIED/CLEAN), inline checklist items with IDs, title truncation at 120 chars
+- **card move**: show resolved list name instead of raw ID
+- **comment list**: display comment IDs
+- **pull --list**: echo resolved list name in output
+
+### Infrastructure
+
+- `resolve_list_name()` helper in `cache/index.py`
+
 ## 0.1.5 — 2026-03-13
 
 AI agent onboarding command.
