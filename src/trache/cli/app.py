@@ -12,6 +12,8 @@ from trache import __version__
 from trache.cli.card import card_app
 from trache.cli.checklist import checklist_app
 from trache.cli.comment import comment_app
+from trache.cli.label import label_app
+from trache.cli.list_cmd import list_app
 
 app = typer.Typer(
     name="trache",
@@ -21,6 +23,8 @@ app = typer.Typer(
 app.add_typer(card_app, name="card", help="Card operations")
 app.add_typer(checklist_app, name="checklist", help="Checklist operations")
 app.add_typer(comment_app, name="comment", help="Comment operations")
+app.add_typer(label_app, name="label", help="Label operations")
+app.add_typer(list_app, name="list", help="List operations")
 
 console = Console()
 
