@@ -1,29 +1,17 @@
 # Trache
 
-Local-first Trello cache with Git-style sync — optimised for on-machine AI workflows.
+Stop burning tokens talking to Trello. Pull once, work locally, push when you're done.
 
-## What Is Trache?
+Trache gives your AI agent (or you) a local cache of a Trello board with Git-style `pull`/`push` semantics. Reading a card is a file read. Editing a card is a file write. Nothing hits the network until you say `trache push`.
 
-Trache gives you a local cache of your Trello board with explicit pull/push sync semantics. Instead of hitting the Trello API for every read or write, you work against a local copy and sync deltas on your terms.
+```
+Reading one card via MCP/API:  ~4,000 tokens + network round-trip
+Reading one card via trache:   one local file read, zero tokens wasted
+```
 
-- **Targeted, not bulk** — small index read for discovery, targeted card load, targeted push
-- **Token-efficient** — compact markdown per card, small JSON indexes for discovery
-- **Version-verified** — identifier blocks ensure AI and human see the same version on Trello
-- **Granular sync** — pull/push at card or list level; never forced to sync the entire board
-
-## Why?
-
-MCP-based Trello integrations and direct API calls are wasteful for AI agent workflows:
-- Every card read is an API call
-- Every edit is an API call
-- Full-board fetches burn tokens and rate limits
-- No local diff/status to preview changes before pushing
-
-Trache solves this by maintaining a local cache with Git-style semantics: pull once, work locally, push when ready.
+> **Using an AI agent?** Run `trache agents` after setup for agent-specific instructions, or `trache agents --reference` for a compact command cheat-sheet.
 
 ## Install
-
-**From source (recommended for now):**
 
 ```bash
 git clone <repo-url>
@@ -33,7 +21,7 @@ pip install -e .          # editable install
 pip install .             # standard install
 ```
 
-Requires Python 3.10+.
+Requires Python 3.10+. Uses [hatchling](https://pypi.org/project/hatchling/) as the build backend — if you're in a sandboxed or offline environment without hatchling, install it first (`pip install hatchling`) or use `pip install --no-build-isolation .`
 
 **Optional dependencies:**
 
@@ -60,6 +48,8 @@ export TRELLO_TOKEN=your_token
 ```
 
 ## Quick Start
+
+**UID6** — the last 6 characters of a Trello card ID (e.g. `B1A403`). This is how you reference cards in every command. Case-insensitive input, displayed uppercase.
 
 ```bash
 # Initialise cache for a board
@@ -100,18 +90,31 @@ pull → discover → read → mutate → status/diff → push
 5. **`trache status`** / **`trache diff`** — review what changed
 6. **`trache push`** — push only the changed objects to Trello
 
+## Things to Know
+
+A few behaviours that aren't obvious from the happy path:
+
+- **List names aren't unique.** If your board has duplicate list names, `--list "Name"` and `card create "Name" ...` will silently pick one. Prefer list IDs or ensure names are unique.
+- **Comment commands hit the API immediately.** Unlike every other mutation, `comment add`, `comment edit`, and `comment delete` are not local-first — they write to Trello the moment you run them.
+- **Labels are validated against the board.** `add-label` checks the label name against your board's labels (pulled into `labels.json`). Use `trache label list` to see what's available, or `trache label create` to add new ones.
+- **New cards get temporary IDs.** Locally-created cards are assigned a temp UID6 (containing `T~`) until pushed. After push, trache reconciles the temp ID to the real Trello ID and reports the mapping.
+- **Push can partially succeed.** If you push multiple cards and some fail (e.g. an invalid label), the successful ones still land. Check `trache status` after push to see what's still dirty.
+- **Prefer UID6 over names** once you've resolved a card. UID6 is unambiguous; names and list names can collide.
+- For agent-specific guidance, run `trache agents --reference` for the compact command surface.
+
 ## Command Reference
 
 ### Top-Level Commands
 
 | Command | Description |
 |---|---|
-| `trache init` | Initialise cache for a board (`--board-id` or `--board-url`) |
+| `trache init` | Initialise cache for a board (`--board-id` or `--board-url`, `--auth` for token URL) |
 | `trache pull` | Pull from Trello (`--card <id>`, `--list <name>`, `--force`) |
 | `trache push` | Push local changes to Trello (`--card <id>`, `--dry-run`) |
-| `trache sync` | Push then pull (`--dry-run`) |
+| `trache sync` | Push then pull (`--dry-run`, `--card <id>`) |
 | `trache status` | Show dirty state summary |
 | `trache diff` | Show detailed clean vs working diff |
+| `trache agents` | Print agent setup instructions (`--reference` for command cheat-sheet) |
 | `trache version` | Show installed version |
 
 ### Card Commands
@@ -125,7 +128,7 @@ pull → discover → read → mutate → status/diff → push
 | `trache card move <id> <list>` | Move card to a different list |
 | `trache card create <list> <title>` | Create a new card (`--desc` for description) |
 | `trache card archive <id>` | Archive a card |
-| `trache card add-label <id> <label>` | Add a label to a card |
+| `trache card add-label <id> <label>` | Add a label (must match a board label) |
 | `trache card remove-label <id> <label>` | Remove a label from a card |
 
 All card commands accept Card ID or UID6 as the identifier.
@@ -135,6 +138,7 @@ All card commands accept Card ID or UID6 as the identifier.
 | Command | Description |
 |---|---|
 | `trache checklist show <card>` | Show checklists for a card |
+| `trache checklist create <card> <name>` | Create a new checklist |
 | `trache checklist check <card> <item_id>` | Mark item complete |
 | `trache checklist uncheck <card> <item_id>` | Mark item incomplete |
 | `trache checklist add-item <card> <checklist_name> <text>` | Add item to checklist by name |
@@ -142,14 +146,35 @@ All card commands accept Card ID or UID6 as the identifier.
 
 All checklist mutations are local-first — push to sync.
 
-### Comment Commands
+### Comment Commands (API-direct)
 
 | Command | Description |
 |---|---|
-| `trache comment add <card> <text>` | Add a comment (pushes immediately) |
-| `trache comment list <card>` | List comments (fetches from API) |
+| `trache comment add <card> <text>` | Add a comment |
+| `trache comment edit <card> <comment_id> <text>` | Edit a comment |
+| `trache comment delete <card> <comment_id>` | Delete a comment |
+| `trache comment list <card>` | List comments |
 
-Note: Comment commands hit the Trello API directly — they are not local-first.
+**All comment commands hit the Trello API immediately.** They bypass the local-first model entirely — there is no undo via `trache status` or `trache diff`.
+
+### Label Commands
+
+| Command | Description |
+|---|---|
+| `trache label list` | List board labels (from local cache) |
+| `trache label create <name>` | Create a new board label (`--color`) |
+| `trache label delete <name>` | Delete a board label |
+
+### List Commands
+
+| Command | Description |
+|---|---|
+| `trache list show` | Show all board lists |
+| `trache list create <name>` | Create a new list (`--pos top\|bottom`) |
+| `trache list rename <old> <new>` | Rename a list |
+| `trache list archive <name>` | Archive a list (`--yes` required) |
+
+List commands are API-direct (like comments).
 
 ## Local-First Model
 
@@ -159,10 +184,6 @@ Trache maintains two copies of your board data:
 - **Working** (`.trache/working/`) — your editable copy. All local mutations happen here.
 
 `trache status` and `trache diff` compare clean vs working to detect changes. `trache push` sends working changes to Trello and re-pulls each pushed card to reconcile.
-
-### UID6
-
-The last 6 characters of a Trello card ID (uppercase). All card/checklist commands accept UID6 as an identifier. Input is case-insensitive.
 
 ### Dirty Pull Guard
 
@@ -187,13 +208,13 @@ trache pull --card <uid6>     # refresh one card
 trache pull --list "To Do"    # refresh one list
 ```
 
+## How It Works
+
+A few implementation details, if you're curious:
+
 ### Identifier Block
 
-Each card's Trello description is prepended with an identifier block containing metadata (card name, dates, UID6). This block is:
-
-- Regenerated on every push from canonical frontmatter
-- Stripped on every pull (never stored locally)
-- Ensures humans and AI see the same version on Trello
+Each card's Trello description is prepended with a metadata block (card name, dates, UID6) on push. This block is stripped on pull and never stored locally — it exists only on the Trello side so that humans browsing the board see version metadata alongside the description.
 
 ### Modified Date vs Last Activity
 
@@ -201,15 +222,6 @@ Each card's Trello description is prepended with an identifier block containing 
 - **`last_activity`** — Trello's `dateLastActivity`. Updates on any activity including comments, member changes, etc.
 
 On re-pull, Trache preserves `content_modified_at` if content hasn't changed, even if `dateLastActivity` bumped due to non-content activity.
-
-### Checklist State Model
-
-Checklists follow the same clean/working split as cards:
-
-- Stored as `<card_id>.json` in `clean/checklists/` and `working/checklists/`
-- CLI commands edit the working copy locally
-- Changes show in `trache status` / `trache diff`
-- Pushed to Trello with `trache push`
 
 ### Discovery Index
 
@@ -240,21 +252,12 @@ A single `index.json` in `.trache/indexes/` provides full board orientation in o
     board_meta.md                  # Board name/URL
 ```
 
-## Validation Status
+## Known Limitations
 
-**Live-validated on real Trello boards:**
-- pull (full board, targeted card, targeted list)
-- push (card fields, labels, checklists, description with identifier block)
-- sync (push + pull cycle)
-- dirty pull guard
-- identifier block injection and stripping
-
-**Mock-validated (unit/integration tests):**
-- card create, archive, move
-- checklist add-item, remove-item, check, uncheck
-- comment add, comment list
-- status, diff
-- all error/edge case paths
+- **No rate limiting or retry** — avoid rapid-fire API calls.
+- **No concurrent-agent conflict resolution** — if two agents push changes to the same card, last write wins silently. Coordinate externally if sharing a board.
+- **Duplicate list names are ambiguous** — list-name targeting picks one arbitrarily. Rename duplicates or use list IDs.
+- **Card create and archive are mock-validated only** — they work in practice but don't yet have live integration tests.
 
 ## Development
 
@@ -275,9 +278,12 @@ make fmt
 
 ## LLM / Agent Integration
 
-Trache is designed for Claude Code and similar AI coding agents. See the [Claude skill](.claude/skills/trache/SKILL.md) for a complete command cookbook and workflow guide.
+Trache is built for Claude Code and similar AI coding agents.
 
-For Claude Code projects, the `CLAUDE.md` file provides agent-facing operating policy. The skill provides detailed command syntax and examples.
+- **`trache agents`** — prints setup instructions for injecting trache into your agent's instruction files
+- **`trache agents --reference`** — prints a compact command reference designed for agent context windows
+- **[Claude skill](.claude/skills/trache/SKILL.md)** — full command cookbook and workflow guide
+- **`CLAUDE.md`** — agent-facing operating policy (generated by `trache init`)
 
 ## License
 
