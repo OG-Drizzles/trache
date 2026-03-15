@@ -62,6 +62,15 @@ def _get_client(cache_dir: Path):
     return get_client_and_config(cache_dir)
 
 
+def _print_api_stats() -> None:
+    """Print API call stats if any calls were made."""
+    from trache.api.client import get_api_stats
+
+    stats = get_api_stats()
+    if stats["calls"] > 0:
+        console.print(f"[dim]({int(stats['calls'])} API calls, {stats['total_ms'] / 1000:.1f}s)[/dim]")
+
+
 @app.command()
 def init(
     board_id: str = typer.Option(None, "--board-id", "-b", help="Trello board ID"),
@@ -246,6 +255,8 @@ def pull(
         console.print(f"[red]{msg}[/red]")
         raise typer.Exit(1)
 
+    _print_api_stats()
+
 
 @app.command()
 def status() -> None:
@@ -355,6 +366,8 @@ def push(
     for entry in result.archived:
         console.print(f"  - {escape(entry.title)} [{entry.uid6}]")
 
+    _print_api_stats()
+
     if result.errors:
         for err in result.errors:
             console.print(f"[red]Error: {err}[/red]")
@@ -410,6 +423,8 @@ def sync(
                     )
         else:
             console.print("[yellow]Dry run — skipping pull[/yellow]")
+
+    _print_api_stats()
 
 
 @app.command()

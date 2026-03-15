@@ -159,6 +159,12 @@ def push_changes(
                 on_progress(idx, total, f"Archiving {change.title} [{uid6}]")
             try:
                 client.archive_card(change.card_id)
+                # Clean up local state so card isn't re-detected as deleted
+                (cache_dir / "clean" / "cards" / f"{change.card_id}.md").unlink(missing_ok=True)
+                (cache_dir / "clean" / "checklists" / f"{change.card_id}.json").unlink(missing_ok=True)
+                (cache_dir / "working" / "checklists" / f"{change.card_id}.json").unlink(missing_ok=True)
+                from trache.cache.index import remove_card_from_index
+                remove_card_from_index(change.card_id, cache_dir / "indexes")
                 result.archived.append(entry)
             except Exception as e:
                 result.errors.append(f"Failed to archive {change.card_id}: {e}")
@@ -293,6 +299,19 @@ def _push_new_card(
     )
     corrected_desc = inject_block(card.description, corrected_block)
     client.update_card(new_card.id, {"desc": corrected_desc})
+
+    # Push checklists for the new card (read from temp checklist JSON)
+    temp_cl_path = cache_dir / "working" / "checklists" / f"{change.card_id}.json"
+    if temp_cl_path.exists():
+        import json as _json
+
+        cl_data_list = _json.loads(temp_cl_path.read_text())
+        for cl_data in cl_data_list:
+            new_cl = client.create_checklist(new_card.id, cl_data["name"])
+            for item in cl_data.get("items", []):
+                new_item = client.add_checklist_item(new_cl.id, item["name"])
+                if item.get("state") == "complete":
+                    client.update_checklist_item(new_card.id, new_item.id, "complete")
 
     # Archive on Trello if the card was archived locally
     was_archived = card.closed

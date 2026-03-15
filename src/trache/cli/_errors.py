@@ -29,12 +29,16 @@ def handle_resolve_errors(func):
     return wrapper
 
 
-def guard_archived(identifier: str, cache_dir: Path, *, force: bool = False) -> None:
+def guard_archived(identifier: str, cache_dir: Path, *, force: bool = False) -> "Card | None":
     """Block edits to archived cards unless --force is set.
+
+    Returns the loaded Card on success (so callers can reuse it), or None
+    if the card was not found (letting the actual command handle the error).
 
     Raises typer.Exit(1) if the card is archived and force is False.
     Prints a warning if force is True.
     """
+    from trache.cache.models import Card
     from trache.cache.working import read_working_card
 
     try:
@@ -51,5 +55,6 @@ def guard_archived(identifier: str, cache_dir: Path, *, force: bool = False) -> 
                     f"Use --force to edit archived cards.[/red]"
                 )
                 raise typer.Exit(1)
+        return card
     except (KeyError, FileNotFoundError):
-        pass  # Card not found — let the actual command handle the error
+        return None  # Card not found — let the actual command handle the error

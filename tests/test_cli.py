@@ -180,6 +180,33 @@ class TestChecklistRemoveItem:
         assert "not found" in result.output
 
 
+class TestCardShowDisplaysChecklists:
+    """F-005: card show must display checklists from the JSON file."""
+
+    def test_card_show_displays_checklists(self, tmp_path: Path, monkeypatch) -> None:
+        _setup_cli_cache(tmp_path, monkeypatch)
+        result = runner.invoke(app, ["card", "show", "FEDCBA"])
+        assert result.exit_code == 0
+        assert "MVP" in result.output
+        assert "Item 1" in result.output
+        assert "Item 2" in result.output
+        # Verify checklist state markers
+        assert "[ ]" in result.output  # incomplete item
+        assert "[x]" in result.output  # complete item
+
+    def test_card_show_no_checklists(self, tmp_path: Path, monkeypatch) -> None:
+        """Card with no checklist JSON file should still show without errors."""
+        _setup_cli_cache(tmp_path, monkeypatch)
+        # Remove the checklist file
+        cache_dir = tmp_path / ".trache" / "boards" / "test"
+        (cache_dir / "working" / "checklists" / "67abc123def4567890fedcba.json").unlink()
+        result = runner.invoke(app, ["card", "show", "FEDCBA"])
+        assert result.exit_code == 0
+        assert "Test Card" in result.output
+        # Should not contain checklist headers
+        assert "MVP" not in result.output
+
+
 class TestCardShowInvalidUID6:
     def test_invalid_uid6_friendly_error(self, tmp_path: Path, monkeypatch) -> None:
         """card show XXXXXX → exit 1, 'Invalid card identifier' in output (no traceback)."""

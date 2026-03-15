@@ -367,3 +367,58 @@ class TestFuzzyMatch:
     def test_edit_distance_match(self, tmp_path: Path, monkeypatch) -> None:
         _setup_multi_board(tmp_path, monkeypatch)
         assert _fuzzy_match("wrk") == "work"
+
+
+# --- F-003: Path containment ---
+
+
+class TestOffboardPathSafety:
+    def test_offboard_rejects_sibling_path(self, tmp_path: Path, monkeypatch) -> None:
+        """A path like .trache/boardsX/foo should fail the is_relative_to check."""
+        trache_root = _setup_multi_board(tmp_path, monkeypatch)
+
+        # Create a sibling directory outside boards/
+        sibling = trache_root / "boardsX" / "evil"
+        sibling.mkdir(parents=True)
+
+        result = runner.invoke(app, ["board", "offboard", "evil", "--yes"])
+        # Should fail because "evil" doesn't exist under boards/
+        assert result.exit_code == 1
+
+
+# --- F-008: Legacy migration atomicity ---
+
+
+class TestLegacyMigrationAtomicity:
+    def test_migrate_legacy_interrupted_resumes(self, tmp_path: Path, monkeypatch) -> None:
+        """If migration was interrupted (marker exists, originals still present), resume cleanup."""
+        monkeypatch.chdir(tmp_path)
+        set_board_override(None)
+
+        from trache.cli._context import _migrate_legacy
+
+        # Create legacy flat layout
+        legacy = tmp_path / ".trache"
+        ensure_cache_structure(legacy)
+        config = TracheConfig(board_id="legacy_board_123456789012", board_name="Resume Board")
+        config.save(legacy)
+
+        # Simulate interrupted migration: copy into board dir + write marker, but leave originals
+        import shutil
+
+        alias = "resume-board"
+        board_dir = legacy / "boards" / alias
+        board_dir.mkdir(parents=True)
+        shutil.copy2(str(legacy / "config.json"), str(board_dir / "config.json"))
+        (board_dir / ".migration_complete").write_text("done\n")
+
+        # Call _migrate_legacy directly (resolve_cache_dir skips if boards/ exists)
+        _migrate_legacy()
+
+        assert board_dir.exists()
+        # Originals should be cleaned up
+        assert not (legacy / "config.json").exists()
+        # Marker should be removed
+        assert not (board_dir / ".migration_complete").exists()
+        # Active board should be set
+        assert (legacy / "active").read_text().strip() == alias

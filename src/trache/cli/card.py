@@ -88,6 +88,15 @@ def show_card(
 
     card = read_working_card(identifier, cache_dir)
 
+    # Load checklists from separate JSON file (not stored in card markdown)
+    import json
+    from trache.cache.models import Checklist
+
+    cl_path = cache_dir / "working" / "checklists" / f"{card.id}.json"
+    if cl_path.exists():
+        cl_data = json.loads(cl_path.read_text())
+        card.checklists = [Checklist(**cl) for cl in cl_data]
+
     # Title (truncate pathological lengths)
     if len(card.title) > 120:
         title_display = card.title[:120] + f"… (len={len(card.title)})"
@@ -123,8 +132,8 @@ def show_card(
         for cl in card.checklists:
             console.print(f"[bold]{cl.name}[/bold]: {cl.complete}/{cl.total} complete")
             for item in cl.items:
-                check = "[x]" if item.state == "complete" else "[ ]"
-                console.print(f"  {check} {item.name} [dim]({item.id})[/dim]")
+                check = "\\[x]" if item.state == "complete" else "\\[ ]"
+                console.print(f"  {check} {escape(item.name)} [dim]({item.id})[/dim]")
 
 
 @card_app.command("edit-title")
@@ -138,8 +147,8 @@ def edit_title(
     from trache.cache.working import edit_title as _edit_title
 
     cache_dir = _cache_dir()
-    guard_archived(identifier, cache_dir, force=force)
-    card = _edit_title(identifier, title, cache_dir)
+    guarded = guard_archived(identifier, cache_dir, force=force)
+    card = _edit_title(guarded.id if guarded else identifier, title, cache_dir)
     console.print(f"[green]Title updated: {escape(card.title)} [{card.uid6}][/green]")
 
 
@@ -154,8 +163,8 @@ def edit_desc(
     from trache.cache.working import edit_description
 
     cache_dir = _cache_dir()
-    guard_archived(identifier, cache_dir, force=force)
-    card = edit_description(identifier, desc, cache_dir)
+    guarded = guard_archived(identifier, cache_dir, force=force)
+    card = edit_description(guarded.id if guarded else identifier, desc, cache_dir)
     console.print(f"[green]Description updated: {escape(card.title)} [{card.uid6}][/green]")
 
 
@@ -171,8 +180,8 @@ def move(
     from trache.cache.working import move_card
 
     cache_dir = _cache_dir()
-    guard_archived(identifier, cache_dir, force=force)
-    card = move_card(identifier, list_target, cache_dir)
+    guarded = guard_archived(identifier, cache_dir, force=force)
+    card = move_card(guarded.id if guarded else identifier, list_target, cache_dir)
     list_display = resolve_list_name(card.list_id, cache_dir / "indexes")
     console.print(f"[green]Moved {escape(card.title)} [{card.uid6}] to list {escape(list_display)}[/green]")
 
@@ -219,8 +228,8 @@ def add_label_cmd(
     from trache.cache.working import add_label
 
     cache_dir = _cache_dir()
-    guard_archived(identifier, cache_dir, force=force)
-    card, added = add_label(identifier, label, cache_dir)
+    guarded = guard_archived(identifier, cache_dir, force=force)
+    card, added = add_label(guarded.id if guarded else identifier, label, cache_dir)
     if added:
         console.print(f"[green]Label '{escape(label)}' added to {escape(card.title)} [{card.uid6}][/green]")
     else:
@@ -238,9 +247,9 @@ def remove_label_cmd(
     from trache.cache.working import remove_label
 
     cache_dir = _cache_dir()
-    guard_archived(identifier, cache_dir, force=force)
+    guarded = guard_archived(identifier, cache_dir, force=force)
     try:
-        card = remove_label(identifier, label, cache_dir)
+        card = remove_label(guarded.id if guarded else identifier, label, cache_dir)
         console.print(
             f"[green]Label '{escape(label)}' removed from {escape(card.title)} [{card.uid6}][/green]"
         )

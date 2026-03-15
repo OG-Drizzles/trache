@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.2.3 — 2026-03-15
+
+Audit v2 remediation. Addresses 8 findings (F-001–F-008) and 6 opportunities (O-001–O-006) from the post-remediation audit.
+
+### Data Integrity
+
+- **Checklist push for new cards** (F-001/O-001): `_push_new_card()` now reads the temp checklist JSON and creates checklists, items, and checked states on Trello before cleanup — previously checklists on locally-created cards were silently lost
+- **Clean snapshot cleanup after archive** (F-002/O-002): pushing a deleted card now removes `clean/cards/*.md`, `clean/checklists/*.json`, `working/checklists/*.json`, and the index entry — previously archived cards were re-detected as deleted on every subsequent push
+- **Atomic active-board write** (F-004/O-004): `set_active_board()` now uses `atomic_write()` instead of `write_text()` for crash safety
+- **Atomic legacy migration** (F-008): `_migrate_legacy()` uses a copy→marker→delete two-phase approach; interrupted migrations resume from the marker on next invocation
+
+### CLI Correctness
+
+- **Card show displays checklists** (F-005/O-003): `show_card()` now loads checklists from the separate JSON file into `card.checklists` — previously the checklist display code was dead because checklists aren't stored in card markdown
+- **Rich markup escaping**: `[x]` and `[ ]` checklist markers are now escaped to prevent Rich from interpreting them as markup tags
+- **Path containment fix** (F-003/O-005): `offboard` safety check uses `Path.is_relative_to()` instead of string-prefix comparison, preventing false positives on sibling directories like `.trache/boardsX/`
+
+### Observability
+
+- **API stats display** (O-006): `pull`, `push`, and `sync` commands now print `(N API calls, X.Xs)` at the end of each invocation
+
+### Efficiency
+
+- **Guard-archived returns card** (F-006): `guard_archived()` now returns the loaded `Card` object so callers can pass `card.id` directly, eliminating a redundant `read_working_card()` call per guarded command
+
+### Tests
+
+- 189 tests (up from 180): new suites for checklist push on new cards (3), archive cleanup idempotency (2), card-show checklist display (2), offboard path safety (1), legacy migration resumption (1)
+
 ## 0.2.2 — 2026-03-15
 
 Full system audit remediation. Addresses all 14 findings (F-001–F-014) and all 11 opportunities (O-001–O-011) from the 2026-03-15 audit.

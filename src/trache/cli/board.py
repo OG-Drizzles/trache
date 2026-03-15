@@ -141,7 +141,7 @@ def offboard(
     # Validate path is under .trache/boards/ before removing
     resolved = board_dir.resolve()
     boards_root = (TRACHE_ROOT / "boards").resolve()
-    if not str(resolved).startswith(str(boards_root)):
+    if not resolved.is_relative_to(boards_root):
         console.print("[red]Safety check failed: path is not under .trache/boards/[/red]")
         raise typer.Exit(1)
 

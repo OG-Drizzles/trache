@@ -37,8 +37,10 @@ def get_active_board_name() -> str:
 
 def set_active_board(name: str) -> None:
     """Write the active board alias to .trache/active."""
+    from trache.cache._atomic import atomic_write
+
     TRACHE_ROOT.mkdir(parents=True, exist_ok=True)
-    (TRACHE_ROOT / "active").write_text(name + "\n")
+    atomic_write(TRACHE_ROOT / "active", name + "\n")
 
 
 def list_board_names() -> list[str]:
@@ -100,7 +102,15 @@ def slugify(name: str) -> str:
 
 
 def _migrate_legacy() -> None:
-    """Migrate flat .trache/ layout to multi-board layout."""
+    """Migrate flat .trache/ layout to multi-board layout.
+
+    Uses a two-phase approach for crash safety:
+    1. Copy all items into the board directory
+    2. Write a .migration_complete marker
+    3. Delete originals from .trache/ root
+
+    If interrupted, the marker allows resuming from Phase 3.
+    """
     config_path = TRACHE_ROOT / "config.json"
     if not config_path.exists():
         return
@@ -114,17 +124,41 @@ def _migrate_legacy() -> None:
 
     alias = slugify(board_name) if board_name else "default"
     board_dir = TRACHE_ROOT / "boards" / alias
-    board_dir.mkdir(parents=True, exist_ok=True)
+    marker = board_dir / ".migration_complete"
 
-    # Move known contents into board directory
     items_to_move = [
         "config.json", "state.json", "indexes", "clean", "working",
     ]
+
+    if not marker.exists():
+        # Phase 1 — Copy all items into board directory
+        board_dir.mkdir(parents=True, exist_ok=True)
+        for item_name in items_to_move:
+            src = TRACHE_ROOT / item_name
+            if src.exists():
+                dst = board_dir / item_name
+                if not dst.exists():
+                    if src.is_dir():
+                        shutil.copytree(str(src), str(dst))
+                    else:
+                        shutil.copy2(str(src), str(dst))
+
+        # Phase 2 — Write marker (atomic)
+        from trache.cache._atomic import atomic_write
+
+        atomic_write(marker, "done\n")
+
+    # Phase 3 — Delete originals
     for item_name in items_to_move:
         src = TRACHE_ROOT / item_name
         if src.exists():
-            dst = board_dir / item_name
-            shutil.move(str(src), str(dst))
+            if src.is_dir():
+                shutil.rmtree(str(src))
+            else:
+                src.unlink()
+
+    # Remove marker now that migration is complete
+    marker.unlink(missing_ok=True)
 
     # Set active board
     set_active_board(alias)
