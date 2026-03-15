@@ -8,36 +8,18 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import MagicMock
 
-from trache.cache.models import Board, Card, Label, TrelloList
+from trache.cache.models import Card, TrelloList
 from trache.cache.store import read_card_file, write_card_file
-from trache.config import TracheConfig, ensure_cache_structure
 from trache.sync.pull import pull_full_board
 
-
-def _make_client(cards, lists=None, checklists=None, labels=None):
-    client = MagicMock()
-    client.get_board.return_value = Board(id="board1", name="Test Board", url="")
-    client.get_board_lists.return_value = lists or []
-    client.get_board_cards.return_value = cards
-    client.get_board_checklists.return_value = checklists or []
-    client.get_board_labels.return_value = labels or [Label(id="lbl1", name="bug", color="red")]
-    return client
-
-
-def _setup(tmp_path):
-    cache_dir = tmp_path / ".trache"
-    ensure_cache_structure(cache_dir)
-    config = TracheConfig(board_id="board1")
-    config.save(cache_dir)
-    return cache_dir, config
+from conftest import make_mock_client, setup_cache
 
 
 class TestContentModifiedAtPreservation:
     def test_preserved_on_repull_no_content_change(self, tmp_path: Path) -> None:
         """Re-pull with no content changes → content_modified_at unchanged."""
-        cache_dir, config = _setup(tmp_path)
+        cache_dir, config = setup_cache(tmp_path)
 
         original_time = datetime(2026, 3, 10, 12, 0, 0, tzinfo=timezone.utc)
         card = Card(
@@ -51,7 +33,7 @@ class TestContentModifiedAtPreservation:
         )
 
         # First pull
-        client = _make_client([card])
+        client = make_mock_client([card])
         pull_full_board(config, client, cache_dir, force=True)
 
         # Read the stored content_modified_at
@@ -69,7 +51,7 @@ class TestContentModifiedAtPreservation:
             content_modified_at=datetime(2026, 3, 11, 12, 0, 0, tzinfo=timezone.utc),
             last_activity=datetime(2026, 3, 11, 12, 0, 0, tzinfo=timezone.utc),
         )
-        client2 = _make_client([card_v2])
+        client2 = make_mock_client([card_v2])
         pull_full_board(config, client2, cache_dir, force=True)
 
         stored2 = read_card_file(cache_dir / "clean" / "cards" / "67abc123def4567890fedcba.md")
@@ -77,7 +59,7 @@ class TestContentModifiedAtPreservation:
 
     def test_updated_on_repull_content_change(self, tmp_path: Path) -> None:
         """Re-pull with content change → content_modified_at updates."""
-        cache_dir, config = _setup(tmp_path)
+        cache_dir, config = setup_cache(tmp_path)
 
         card = Card(
             id="67abc123def4567890fedcba",
@@ -89,7 +71,7 @@ class TestContentModifiedAtPreservation:
             last_activity=datetime(2026, 3, 10, 12, 0, 0, tzinfo=timezone.utc),
         )
 
-        client = _make_client([card])
+        client = make_mock_client([card])
         pull_full_board(config, client, cache_dir, force=True)
 
         stored = read_card_file(cache_dir / "clean" / "cards" / "67abc123def4567890fedcba.md")
@@ -105,7 +87,7 @@ class TestContentModifiedAtPreservation:
             content_modified_at=datetime(2026, 3, 11, 12, 0, 0, tzinfo=timezone.utc),
             last_activity=datetime(2026, 3, 11, 12, 0, 0, tzinfo=timezone.utc),
         )
-        client2 = _make_client([card_v2])
+        client2 = make_mock_client([card_v2])
         pull_full_board(config, client2, cache_dir, force=True)
 
         stored2 = read_card_file(cache_dir / "clean" / "cards" / "67abc123def4567890fedcba.md")
@@ -113,7 +95,7 @@ class TestContentModifiedAtPreservation:
 
     def test_comment_only_preserves_content_modified_at(self, tmp_path: Path) -> None:
         """Remote comment-only change updates last_activity but NOT content_modified_at."""
-        cache_dir, config = _setup(tmp_path)
+        cache_dir, config = setup_cache(tmp_path)
 
         original_time = datetime(2026, 3, 10, 12, 0, 0, tzinfo=timezone.utc)
         card = Card(
@@ -126,7 +108,7 @@ class TestContentModifiedAtPreservation:
             last_activity=original_time,
         )
 
-        client = _make_client([card])
+        client = make_mock_client([card])
         pull_full_board(config, client, cache_dir, force=True)
         stored = read_card_file(cache_dir / "clean" / "cards" / "67abc123def4567890fedcba.md")
         first_modified = stored.content_modified_at
@@ -142,7 +124,7 @@ class TestContentModifiedAtPreservation:
             content_modified_at=later_time,  # API always sets this to dateLastActivity
             last_activity=later_time,
         )
-        client2 = _make_client([card_v2])
+        client2 = make_mock_client([card_v2])
         pull_full_board(config, client2, cache_dir, force=True)
 
         stored2 = read_card_file(cache_dir / "clean" / "cards" / "67abc123def4567890fedcba.md")
@@ -154,7 +136,7 @@ class TestContentModifiedAtPreservation:
         from trache.cache.index import build_index
         from trache.cache.working import edit_title
 
-        cache_dir, config = _setup(tmp_path)
+        cache_dir, config = setup_cache(tmp_path)
         lists = [TrelloList(id="list1", name="To Do", board_id="board1", pos=1)]
         card = Card(
             id="67abc123def4567890fedcba",
@@ -176,7 +158,7 @@ class TestContentModifiedAtPreservation:
         """Label add/remove locally updates content_modified_at."""
         from trache.cache.index import build_index
 
-        cache_dir, config = _setup(tmp_path)
+        cache_dir, config = setup_cache(tmp_path)
         lists = [TrelloList(id="list1", name="To Do", board_id="board1", pos=1)]
         card = Card(
             id="67abc123def4567890fedcba",
@@ -208,7 +190,7 @@ class TestContentModifiedAtPreservation:
         from trache.cache.index import build_index
         from trache.cache.working import move_card
 
-        cache_dir, config = _setup(tmp_path)
+        cache_dir, config = setup_cache(tmp_path)
         lists = [
             TrelloList(id="list1", name="To Do", board_id="board1", pos=1),
             TrelloList(id="list2", name="Done", board_id="board1", pos=2),

@@ -51,6 +51,9 @@ def main(
     ),
 ) -> None:
     """Local-first Trello cache with Git-style sync."""
+    from trache.api.client import reset_api_stats
+
+    reset_api_stats()
     set_board_override(board)
 
 

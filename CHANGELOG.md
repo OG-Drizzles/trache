@@ -1,5 +1,53 @@
 # Changelog
 
+## 0.2.2 — 2026-03-15
+
+Full system audit remediation. Addresses all 14 findings (F-001–F-014) and all 11 opportunities (O-001–O-011) from the 2026-03-15 audit.
+
+### Sync Layer Correctness
+
+- **Scoped dirty guard** (F-001/O-004): `pull --card` and `pull --list` now check only the targeted card(s) for unpushed changes, not the entire board. Dirty card A no longer blocks refresh of unrelated card B
+- **Eliminated extra GET on push** (F-003): removed `_check_remote_conflict` and its redundant per-card API call; conflict detection now uses stored timestamps
+- **Scoped checklist fetch** (F-006): `pull --list` now fetches checklists per card instead of the entire board
+- **Batch index writes** (O-001): `pull --list` loads index once, applies all card updates, writes once (was N read/write cycles)
+- **Card timestamps in targeted pulls** (F-014): `pull --card` and `pull --list` now update `SyncState.card_timestamps`, fixing false-positive conflict warnings
+- **Skip redundant dirty check on re-pull** (O-002): post-push re-pulls skip the dirty guard entirely via `_skip_dirty_check` flag
+- **TypeAdapter for checklist serialization** (O-009): replaced `json.dumps(model_dump())` with Pydantic `TypeAdapter.dump_json()`
+
+### Write Safety
+
+- **Atomic checklist writes** (F-002): `_save_checklists_for_card` in `checklist.py` now uses `atomic_write` (was bare `write_text`)
+- **Atomic label writes** (O-011): `_save_labels` in `label.py` now uses `atomic_write`
+- **Atomic label push writes** (O-010): `_push_label_creates` receives pre-loaded `labels_data` (avoids redundant file read) and writes atomically
+
+### API Observability & Resilience
+
+- **Retry-After support** (O-005): 429 retries now parse and respect the `Retry-After` header, with jitter
+- **API call tracking** (O-008): `_api_call_count` and `_api_total_ms` tracked across all HTTP methods; `get_api_stats()`/`reset_api_stats()` exposed; stats reset on each CLI invocation
+- **`__del__` safety net** (F-004): `TrelloClient` now has `__del__` for defence-in-depth connection cleanup
+
+### CLI Efficiency
+
+- **Single `_cache_dir()` resolution** (F-005): label commands resolve `cache_dir` once per invocation, not per helper call
+- **Fixed double `_cache_dir()` in card move** (F-010): resolved once, passed to both `guard_archived` and `move_card`
+- **Consolidated client creation** (O-007): `list_cmd.py` now imports `get_client_and_config` from `_context` instead of duplicating it
+- **Thread-local board override** (F-007): replaced module-level `_active_board_override` global with `threading.local()` for test isolation
+- **Removed filesystem scan fallback** (O-003): `resolve_card_id` no longer scans `working/cards/*.md`; raises `KeyError` with guidance to `trache pull`
+
+### Code Quality
+
+- **Public `fields_equal` API** (F-012): renamed from `_fields_equal` in `diff.py`; updated import in `pull.py`
+- **Removed `DEFAULT_CACHE_DIR` alias** (F-009): replaced with `TRACHE_ROOT` in 3 call sites
+- **Hardened `_parse_dt`** (F-008): strips fractional seconds for Python 3.10 `fromisoformat()` compat
+- **Cleaned up `_atomic.py`** (F-011): replaced `_fd_closed` exception-based control flow with boolean flag
+- **Simplified `_BLOCK_PATTERN` regex** (F-013): removed trailing `(?:---\s*\n)*` cleanup group (prior bug long remediated)
+- **Shared test helpers** (O-006): extracted `make_mock_client()` and `setup_cache()` to `conftest.py`; deduplicated from 3 test files
+- **Autouse fixture for board override reset**: prevents test pollution from thread-local state
+
+### Tests
+
+- 180 tests (up from 169): new suites for scoped dirty guard, card timestamp updates, batch index operations, `_parse_dt` edge cases, identity regex regression, unindexed card error
+
 ## 0.2.0 — 2026-03-15
 
 Multi-board support and board lifecycle commands.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import random
 import time
 from datetime import datetime, timezone
@@ -27,11 +28,37 @@ T = TypeVar("T")
 _MAX_RETRIES = 3
 _BASE_DELAY = 1.0
 
+logger = logging.getLogger(__name__)
+
+# Module-level API stats for observability
+_api_call_count: int = 0
+_api_total_ms: float = 0.0
+
+
+def get_api_stats() -> dict[str, float]:
+    """Return current API call count and total latency in ms."""
+    return {"calls": _api_call_count, "total_ms": _api_total_ms}
+
+
+def reset_api_stats() -> None:
+    """Reset API call counters."""
+    global _api_call_count, _api_total_ms
+    _api_call_count = 0
+    _api_total_ms = 0.0
+
+
+def _track_call(elapsed_ms: float) -> None:
+    """Record an API call's latency."""
+    global _api_call_count, _api_total_ms
+    _api_call_count += 1
+    _api_total_ms += elapsed_ms
+
 
 def _retry(fn: Callable[[], T]) -> T:
     """Retry with exponential backoff + jitter on transient errors.
 
     Retries on 429, 5xx HTTP status codes, and transport errors.
+    Respects Retry-After header on 429 responses.
     Max 3 attempts, 1s base delay with jitter.
     """
     last_exc: BaseException | None = None
@@ -42,14 +69,36 @@ def _retry(fn: Callable[[], T]) -> T:
             status = e.response.status_code
             if status == 429 or status >= 500:
                 last_exc = e
+                if attempt < _MAX_RETRIES - 1:
+                    if status == 429:
+                        # Respect Retry-After header if present
+                        retry_after = e.response.headers.get("Retry-After")
+                        if retry_after:
+                            try:
+                                delay = float(retry_after) + random.uniform(0, 0.5)
+                            except (ValueError, TypeError):
+                                delay = _BASE_DELAY * (2 ** attempt) + random.uniform(0, 0.5)
+                        else:
+                            delay = _BASE_DELAY * (2 ** attempt) + random.uniform(0, 0.5)
+                    else:
+                        delay = _BASE_DELAY * (2 ** attempt) + random.uniform(0, 0.5)
+                    logger.debug(
+                        "Retry %d/%d after %s (status=%d, delay=%.1fs)",
+                        attempt + 1, _MAX_RETRIES, e, status, delay,
+                    )
+                    time.sleep(delay)
+                continue
             else:
                 raise
         except httpx.TransportError as e:
             last_exc = e
-
-        if attempt < _MAX_RETRIES - 1:
-            delay = _BASE_DELAY * (2 ** attempt) + random.uniform(0, 0.5)
-            time.sleep(delay)
+            if attempt < _MAX_RETRIES - 1:
+                delay = _BASE_DELAY * (2 ** attempt) + random.uniform(0, 0.5)
+                logger.debug(
+                    "Retry %d/%d after transport error: %s (delay=%.1fs)",
+                    attempt + 1, _MAX_RETRIES, e, delay,
+                )
+                time.sleep(delay)
 
     raise last_exc  # type: ignore[misc]
 
@@ -70,11 +119,19 @@ class TrelloClient:
     def __exit__(self, *args: Any) -> None:
         self.close()
 
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
+
     def _get(self, path: str, params: Optional[dict] = None) -> Any:
         all_params = {**(params or {}), **self._auth.query_params}
 
         def _do() -> Any:
+            t0 = time.monotonic()
             resp = self._client.get(path, params=all_params)
+            _track_call((time.monotonic() - t0) * 1000)
             resp.raise_for_status()
             return resp.json()
 
@@ -84,7 +141,9 @@ class TrelloClient:
         params = self._auth.query_params
 
         def _do() -> Any:
+            t0 = time.monotonic()
             resp = self._client.put(path, params=params, json=data or {})
+            _track_call((time.monotonic() - t0) * 1000)
             resp.raise_for_status()
             return resp.json()
 
@@ -94,7 +153,9 @@ class TrelloClient:
         params = self._auth.query_params
 
         def _do() -> Any:
+            t0 = time.monotonic()
             resp = self._client.post(path, params=params, json=data or {})
+            _track_call((time.monotonic() - t0) * 1000)
             resp.raise_for_status()
             return resp.json()
 
@@ -102,7 +163,9 @@ class TrelloClient:
 
     def _delete(self, path: str) -> None:
         def _do() -> None:
+            t0 = time.monotonic()
             resp = self._client.delete(path, params=self._auth.query_params)
+            _track_call((time.monotonic() - t0) * 1000)
             resp.raise_for_status()
 
         _retry(_do)

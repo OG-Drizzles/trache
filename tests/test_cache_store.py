@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from trache.cache.models import Card
 from trache.cache.store import (
+    _parse_dt,
     card_to_markdown,
     list_card_files,
     markdown_to_card,
@@ -127,3 +130,26 @@ class TestFileOperations:
     def test_list_card_files_empty(self, cache_dir) -> None:
         files = list_card_files(cache_dir / "working" / "cards")
         assert files == []
+
+
+class TestParseDt:
+    """F-008: _parse_dt handles millisecond timestamps and edge cases."""
+
+    def test_none(self) -> None:
+        assert _parse_dt(None) is None
+
+    def test_standard_z(self) -> None:
+        result = _parse_dt("2026-03-10T12:00:00Z")
+        assert result == datetime(2026, 3, 10, 12, 0, 0, tzinfo=timezone.utc)
+
+    def test_with_offset(self) -> None:
+        result = _parse_dt("2026-03-10T12:00:00+00:00")
+        assert result == datetime(2026, 3, 10, 12, 0, 0, tzinfo=timezone.utc)
+
+    def test_milliseconds_z(self) -> None:
+        result = _parse_dt("2026-03-10T12:00:00.123Z")
+        assert result == datetime(2026, 3, 10, 12, 0, 0, tzinfo=timezone.utc)
+
+    def test_milliseconds_offset(self) -> None:
+        result = _parse_dt("2026-03-10T12:00:00.456+00:00")
+        assert result == datetime(2026, 3, 10, 12, 0, 0, tzinfo=timezone.utc)

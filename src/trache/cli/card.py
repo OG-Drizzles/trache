@@ -170,8 +170,8 @@ def move(
     from trache.cache.index import resolve_list_name
     from trache.cache.working import move_card
 
-    guard_archived(identifier, _cache_dir(), force=force)
     cache_dir = _cache_dir()
+    guard_archived(identifier, cache_dir, force=force)
     card = move_card(identifier, list_target, cache_dir)
     list_display = resolve_list_name(card.list_id, cache_dir / "indexes")
     console.print(f"[green]Moved {escape(card.title)} [{card.uid6}] to list {escape(list_display)}[/green]")

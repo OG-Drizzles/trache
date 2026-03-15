@@ -8,14 +8,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from pydantic import TypeAdapter
+
 from trache.api.client import TrelloClient
-from trache.cache.diff import _fields_equal
-from trache.cache.index import add_card_to_index, build_index
+from trache.cache.diff import fields_equal
+from trache.cache.index import add_card_to_index, build_index, update_cards_in_index
 from trache.cache.models import Card, Checklist
 from trache.cache.snapshot import write_clean_snapshot
 from trache.cache.store import read_card_file, write_card_file
 from trache.config import SyncState, TracheConfig
 from trache.identity import strip_block
+
+_CONTENT_FIELDS = ("title", "description", "list_id", "labels", "due", "closed")
+
+_checklist_adapter = TypeAdapter(list[Checklist])
 
 
 @dataclass
@@ -37,6 +43,31 @@ def _check_dirty_state(cache_dir: Path, force: bool) -> None:
     if not changeset.is_empty and not force:
         raise RuntimeError(
             "Working copy has unpushed changes. Push first or use --force to override."
+        )
+
+
+def _check_card_dirty(card_id: str, cache_dir: Path, force: bool) -> None:
+    """Refuse to overwrite a single card if it has unpushed changes (unless force=True)."""
+    if force:
+        return
+
+    clean_path = cache_dir / "clean" / "cards" / f"{card_id}.md"
+    working_path = cache_dir / "working" / "cards" / f"{card_id}.md"
+
+    if not clean_path.exists() or not working_path.exists():
+        return  # New card or missing — no conflict
+
+    clean_card = read_card_file(clean_path)
+    working_card = read_card_file(working_path)
+
+    if any(
+        not fields_equal(f, getattr(clean_card, f), getattr(working_card, f))
+        for f in _CONTENT_FIELDS
+    ):
+        uid6 = card_id[-6:].upper()
+        raise RuntimeError(
+            f"Card {uid6} has unpushed changes. "
+            f"Push first or use --force to override."
         )
 
 
@@ -149,15 +180,20 @@ def pull_card(
     cache_dir: Path,
     *,
     force: bool = False,
+    _skip_dirty_check: bool = False,
 ) -> Card:
     """Pull a single card by ID.
 
-    Raises RuntimeError if working copy has unpushed changes and force=False.
+    Raises RuntimeError if the card has unpushed changes and force=False.
     """
-    _check_dirty_state(cache_dir, force)
     from trache.cache.index import resolve_card_id
 
     card_id = resolve_card_id(card_identifier, cache_dir / "indexes")
+
+    # Scoped dirty guard: only check THIS card, not the whole board
+    if not _skip_dirty_check:
+        _check_card_dirty(card_id, cache_dir, force)
+
     try:
         card = client.get_card(card_id)
     except Exception as e:
@@ -193,6 +229,11 @@ def pull_card(
     else:
         add_card_to_index(card, cache_dir / "indexes")
 
+    # Update card_timestamps for this card
+    state = SyncState.load(cache_dir)
+    state.card_timestamps[card.id] = card.last_activity.isoformat() if card.last_activity else ""
+    state.save(cache_dir)
+
     return card
 
 
@@ -206,21 +247,26 @@ def pull_list(
 ) -> list[Card]:
     """Pull all cards in a specific list.
 
-    Raises RuntimeError if working copy has unpushed changes and force=False.
+    Raises RuntimeError if any card in the list has unpushed changes and force=False.
     """
-    _check_dirty_state(cache_dir, force)
     from trache.cache.index import resolve_list_id
 
     list_id = resolve_list_id(list_identifier, cache_dir / "indexes")
     cards = client.get_list_cards(list_id)
 
-    # Fetch all board checklists in one call instead of N+1 per-card calls
-    card_ids = {card.id for card in cards}
-    all_checklists = client.get_board_checklists(config.board_id)
-    checklists_for_list = [cl for cl in all_checklists if cl.card_id in card_ids]
+    # Scoped dirty guard: check each card in the fetched list individually
+    if not force:
+        for card in cards:
+            _check_card_dirty(card.id, cache_dir, force)
+
+    # Fetch checklists per card (scoped, not board-wide)
+    all_checklists: list[Checklist] = []
+    for card in cards:
+        card_cls = client.get_card_checklists(card.id)
+        all_checklists.extend(card_cls)
 
     # Attach checklists to cards
-    _attach_checklists(cards, checklists_for_list)
+    _attach_checklists(cards, all_checklists)
 
     for card in cards:
         card.description = strip_block(card.description)
@@ -232,35 +278,38 @@ def pull_list(
         write_card_file(card, cache_dir / "working" / "cards")
 
     # Write per-card checklist files
-    _write_per_card_checklists(checklists_for_list, cache_dir)
+    _write_per_card_checklists(all_checklists, cache_dir)
 
-    # Incremental index update per card
+    # Batch index update: load once, apply all, write once
+    update_cards_in_index(cards, cache_dir / "indexes")
+
+    # Update card_timestamps for all pulled cards in bulk
+    state = SyncState.load(cache_dir)
     for card in cards:
-        add_card_to_index(card, cache_dir / "indexes")
+        state.card_timestamps[card.id] = (
+            card.last_activity.isoformat() if card.last_activity else ""
+        )
+    state.save(cache_dir)
 
     return cards
 
 
 def _write_per_card_checklists(checklists: list[Checklist], cache_dir: Path) -> None:
     """Write per-card checklist JSON files to clean and working directories."""
+    from trache.cache._atomic import atomic_write
+
     checklists_by_card: dict[str, list[Checklist]] = {}
     for cl in checklists:
         checklists_by_card.setdefault(cl.card_id, []).append(cl)
 
     for card_id, card_cls in checklists_by_card.items():
-        cl_data = [cl.model_dump() for cl in card_cls]
-        cl_json = json.dumps(cl_data, indent=2, default=str) + "\n"
+        cl_json = _checklist_adapter.dump_json(card_cls, indent=2).decode() + "\n"
         clean_cl_dir = cache_dir / "clean" / "checklists"
         working_cl_dir = cache_dir / "working" / "checklists"
         clean_cl_dir.mkdir(parents=True, exist_ok=True)
         working_cl_dir.mkdir(parents=True, exist_ok=True)
-        from trache.cache._atomic import atomic_write
-
         atomic_write(clean_cl_dir / f"{card_id}.json", cl_json)
         atomic_write(working_cl_dir / f"{card_id}.json", cl_json)
-
-
-_CONTENT_FIELDS = ("title", "description", "list_id", "labels", "due", "closed")
 
 
 def _preserve_content_modified_at(new_card: Card, clean_dir: Path) -> None:
@@ -271,7 +320,7 @@ def _preserve_content_modified_at(new_card: Card, clean_dir: Path) -> None:
 
     old_card = read_card_file(clean_path)
     content_changed = any(
-        not _fields_equal(f, getattr(old_card, f), getattr(new_card, f))
+        not fields_equal(f, getattr(old_card, f), getattr(new_card, f))
         for f in _CONTENT_FIELDS
     )
 

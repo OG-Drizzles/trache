@@ -122,6 +122,34 @@ def add_card_to_index(card: Card, index_dir: Path) -> None:
     _write_json(index_dir / INDEX_FILENAME, index)
 
 
+def update_cards_in_index(cards: list[Card], index_dir: Path) -> None:
+    """Add or update multiple cards in the index with a single read/write cycle."""
+    index = _load_full_index(index_dir)
+
+    for card in cards:
+        # Remove card from old list if it moved
+        existing = index["cards_by_id"].get(card.id)
+        if existing and existing.get("list_id") != card.list_id:
+            old_list = index["cards_by_list"].get(existing["list_id"], [])
+            if card.id in old_list:
+                old_list.remove(card.id)
+
+        index["cards_by_id"][card.id] = {
+            "title": card.title,
+            "list_id": card.list_id,
+            "uid6": card.uid6,
+            "modified_at": (
+                card.content_modified_at.isoformat() if card.content_modified_at else None
+            ),
+        }
+        index["cards_by_uid6"][card.uid6] = card.id
+        index["cards_by_list"].setdefault(card.list_id, [])
+        if card.id not in index["cards_by_list"][card.list_id]:
+            index["cards_by_list"][card.list_id].append(card.id)
+
+    _write_json(index_dir / INDEX_FILENAME, index)
+
+
 def remove_card_from_index(card_id: str, index_dir: Path) -> None:
     """Remove a card from the index."""
     index = _load_full_index(index_dir)
@@ -200,21 +228,6 @@ def resolve_card_id(identifier: str, index_dir: Path) -> str:
     cards_by_id = load_index(index_dir, "cards_by_id")
     if identifier in cards_by_id:
         return identifier
-
-    # Safety net: scan working directory for unindexed cards
-    working_dir = index_dir.parent / "working" / "cards"
-    if working_dir.exists():
-        for card_file in working_dir.glob("*.md"):
-            stem = card_file.stem
-            if stem == identifier or stem[-6:].upper() == upper_id:
-                import warnings
-
-                warnings.warn(
-                    f"Card '{identifier}' resolved via filesystem scan (not in index). "
-                    f"Run 'trache pull' to rebuild indexes.",
-                    stacklevel=2,
-                )
-                return stem
 
     raise KeyError(
         f"Card '{identifier}' not found on this board. "

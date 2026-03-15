@@ -9,6 +9,7 @@ from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
+from trache.cli._context import get_client_and_config, resolve_cache_dir
 from trache.cli._errors import handle_resolve_errors
 
 list_app = typer.Typer(no_args_is_help=True)
@@ -16,19 +17,7 @@ console = Console()
 
 
 def _cache_dir() -> Path:
-    from trache.cli._context import resolve_cache_dir
     return resolve_cache_dir()
-
-
-def _get_client_and_config():
-    """Create an authenticated Trello client from config."""
-    from trache.api.auth import TrelloAuth
-    from trache.api.client import TrelloClient
-    from trache.config import TracheConfig
-
-    config = TracheConfig.load(_cache_dir())
-    auth = TrelloAuth.from_env(config.api_key_env, config.token_env)
-    return TrelloClient(auth), config
 
 
 @list_app.command("show")
@@ -80,7 +69,7 @@ def create(
     """Create a new list on the board (API-direct)."""
     from trache.cache.index import add_list_to_index
 
-    client, config = _get_client_and_config()
+    client, config = get_client_and_config(_cache_dir())
     with client:
         trello_list = client.create_list(config.board_id, name, pos=pos)
 
@@ -102,7 +91,7 @@ def rename(
     index_dir = _cache_dir() / "indexes"
     list_id = resolve_list_id(identifier, index_dir)
 
-    client, _config = _get_client_and_config()
+    client, _config = get_client_and_config(_cache_dir())
     with client:
         trello_list = client.rename_list(list_id, new_name)
 
@@ -130,7 +119,7 @@ def archive(
     index_dir = _cache_dir() / "indexes"
     list_id = resolve_list_id(identifier, index_dir)
 
-    client, _config = _get_client_and_config()
+    client, _config = get_client_and_config(_cache_dir())
     with client:
         client.archive_list(list_id)
 

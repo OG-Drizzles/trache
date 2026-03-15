@@ -20,21 +20,19 @@ def _cache_dir() -> Path:
     return resolve_cache_dir()
 
 
-def _labels_path() -> Path:
-    return _cache_dir() / "working" / "labels.json"
-
-
-def _load_labels() -> list[dict]:
-    path = _labels_path()
+def _load_labels(cache_dir: Path) -> list[dict]:
+    path = cache_dir / "working" / "labels.json"
     if not path.exists():
         return []
     return json.loads(path.read_text())
 
 
-def _save_labels(labels: list[dict]) -> None:
-    path = _labels_path()
+def _save_labels(labels: list[dict], cache_dir: Path) -> None:
+    from trache.cache._atomic import atomic_write
+
+    path = cache_dir / "working" / "labels.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(labels, indent=2) + "\n")
+    atomic_write(path, json.dumps(labels, indent=2) + "\n")
 
 
 @label_app.command("list")
@@ -42,7 +40,8 @@ def list_labels(
     raw: bool = typer.Option(False, "--raw", help="Tab-separated output"),
 ) -> None:
     """List board labels (reads local cache, no API call)."""
-    labels_path = _labels_path()
+    cache_dir = _cache_dir()
+    labels_path = cache_dir / "working" / "labels.json"
 
     if not labels_path.exists():
         console.print("[dim]No labels found. Run `trache pull` first.[/dim]")
@@ -84,7 +83,8 @@ def create(
     color: Optional[str] = typer.Option(None, "--color", "-c", help="Label color"),
 ) -> None:
     """Create a new board label (local-first, push to sync)."""
-    labels = _load_labels()
+    cache_dir = _cache_dir()
+    labels = _load_labels(cache_dir)
 
     # Check for duplicate name
     for lbl in labels:
@@ -95,7 +95,7 @@ def create(
     temp_id = f"temp_{uuid4().hex[:14]}t~"
     entry: dict = {"id": temp_id, "name": name, "color": color}
     labels.append(entry)
-    _save_labels(labels)
+    _save_labels(labels, cache_dir)
 
     color_info = color or "no color"
     console.print(
@@ -109,7 +109,8 @@ def delete(
     name: str = typer.Argument(help="Label name"),
 ) -> None:
     """Delete a board label (local-first, push to sync)."""
-    labels = _load_labels()
+    cache_dir = _cache_dir()
+    labels = _load_labels(cache_dir)
 
     target_idx = None
     for i, lbl in enumerate(labels):
@@ -122,7 +123,6 @@ def delete(
         raise typer.Exit(1)
 
     # Warn if any cards use this label
-    cache_dir = _cache_dir()
     working_cards_dir = cache_dir / "working" / "cards"
     if working_cards_dir.exists():
         from trache.cache.store import list_card_files, read_card_file
@@ -139,5 +139,5 @@ def delete(
             )
 
     labels.pop(target_idx)
-    _save_labels(labels)
+    _save_labels(labels, cache_dir)
     console.print(f"[yellow]Label deleted: {name} (local — push to sync)[/yellow]")

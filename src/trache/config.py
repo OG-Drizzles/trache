@@ -8,8 +8,6 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 TRACHE_ROOT = ".trache"
-# Backwards compat alias
-DEFAULT_CACHE_DIR = TRACHE_ROOT
 
 
 class TracheConfig(BaseModel):
@@ -19,12 +17,12 @@ class TracheConfig(BaseModel):
     board_name: str = ""
     api_key_env: str = "TRELLO_API_KEY"
     token_env: str = "TRELLO_TOKEN"
-    cache_dir: str = DEFAULT_CACHE_DIR
+    cache_dir: str = TRACHE_ROOT
 
     @classmethod
     def load(cls, cache_dir: Optional[Path] = None) -> TracheConfig:
         """Load config from .trache/config.json."""
-        path = (cache_dir or Path(DEFAULT_CACHE_DIR)) / "config.json"
+        path = (cache_dir or Path(TRACHE_ROOT)) / "config.json"
         if not path.exists():
             raise FileNotFoundError(f"Config not found: {path}. Run 'trache init' first.")
         return cls.model_validate_json(path.read_text())
@@ -49,7 +47,7 @@ class SyncState(BaseModel):
 
     @classmethod
     def load(cls, cache_dir: Optional[Path] = None) -> SyncState:
-        path = (cache_dir or Path(DEFAULT_CACHE_DIR)) / "state.json"
+        path = (cache_dir or Path(TRACHE_ROOT)) / "state.json"
         if not path.exists():
             return cls()
         return cls.model_validate_json(path.read_text())
@@ -57,7 +55,7 @@ class SyncState(BaseModel):
     def save(self, cache_dir: Optional[Path] = None) -> Path:
         from trache.cache._atomic import atomic_write
 
-        base = cache_dir or Path(DEFAULT_CACHE_DIR)
+        base = cache_dir or Path(TRACHE_ROOT)
         base.mkdir(parents=True, exist_ok=True)
         path = base / "state.json"
         atomic_write(path, self.model_dump_json(indent=2) + "\n")

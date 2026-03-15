@@ -16,23 +16,20 @@ def atomic_write(path: Path, content: str) -> None:
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    fd_closed = False
     try:
         os.write(fd, content.encode())
         os.close(fd)
+        fd_closed = True
         os.replace(tmp_path, path)
     except BaseException:
-        os.close(fd) if not _fd_closed(fd) else None
+        if not fd_closed:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
         try:
             os.unlink(tmp_path)
         except OSError:
             pass
         raise
-
-
-def _fd_closed(fd: int) -> bool:
-    """Check if a file descriptor is already closed."""
-    try:
-        os.fstat(fd)
-        return False
-    except OSError:
-        return True

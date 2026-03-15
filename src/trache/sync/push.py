@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
-import httpx
 from rich.console import Console
 
 from trache.api.client import TrelloClient
@@ -93,8 +92,13 @@ def push_changes(
         all_changes.append(("deleted", change))
 
     # Push label creates before card changes (so new labels are available for card assignments)
+    labels_path = cache_dir / "working" / "labels.json"
+    labels_data = json.loads(labels_path.read_text()) if labels_path.exists() else []
     if not dry_run and not card_filter:
-        _push_label_creates(changeset.label_changes, client, config, cache_dir, result)
+        _push_label_creates(
+            changeset.label_changes, client, config, cache_dir, result,
+            labels_data=labels_data,
+        )
 
     total = len(all_changes)
 
@@ -163,41 +167,18 @@ def push_changes(
     if not dry_run and not card_filter:
         _push_label_deletes(changeset.label_changes, client, result)
 
-    # Re-pull touched objects (not in dry-run)
+    # Re-pull touched objects (not in dry-run), skip dirty check (force=True)
     if not dry_run:
         for entry in result.pushed:
             try:
-                pull_card(entry.card_id, config, client, cache_dir, force=True)
+                pull_card(
+                    entry.card_id, config, client, cache_dir,
+                    force=True, _skip_dirty_check=True,
+                )
             except Exception as e:
                 result.errors.append(f"Re-pull failed for {entry.card_id}: {e}")
 
     return changeset, result
-
-
-def _check_remote_conflict(
-    card_id: str, client: TrelloClient, cache_dir: Path
-) -> None:
-    """Warn if the remote card has changed since last pull."""
-    state = SyncState.load(cache_dir)
-    stored_ts = state.card_timestamps.get(card_id)
-    if not stored_ts:
-        return  # No baseline — skip check
-
-    try:
-        remote = client.get_card(card_id)
-        if remote.last_activity:
-            remote_ts = remote.last_activity.isoformat()
-            if remote_ts != stored_ts:
-                uid6 = card_id[-6:].upper()
-                _console.print(
-                    f"[yellow]Warning: card [{uid6}] was modified on Trello "
-                    f"since last pull. Local changes will overwrite remote. "
-                    f"Pull first to see remote changes.[/yellow]"
-                )
-    except httpx.HTTPError:
-        pass  # Network issue — don't block push
-    except Exception as e:
-        _console.print(f"[yellow]Warning: conflict check failed unexpectedly: {e}[/yellow]")
 
 
 def _push_modified_card(
@@ -208,7 +189,11 @@ def _push_modified_card(
     cache_dir: Path,
 ) -> None:
     """Push a modified card to Trello."""
-    _check_remote_conflict(change.card_id, client, cache_dir)
+    # Conflict warning using stored timestamps (no extra API call)
+    state = SyncState.load(cache_dir)
+    stored_ts = state.card_timestamps.get(change.card_id)
+    # Warning is emitted after push completes, using the re-pulled card's timestamp
+
     card = read_card_file(working_dir / f"{change.card_id}.md")
 
     update_fields: dict = {}
@@ -377,14 +362,19 @@ def _push_label_creates(
     config: TracheConfig,
     cache_dir: Path,
     result: PushResult,
+    *,
+    labels_data: list[dict] | None = None,
 ) -> None:
     """Push label creates to Trello API. Updates working/labels.json with real IDs."""
+    from trache.cache._atomic import atomic_write
+
     creates = [lc for lc in label_changes if lc.change_type == "created"]
     if not creates:
         return
 
     labels_path = cache_dir / "working" / "labels.json"
-    labels_data = json.loads(labels_path.read_text()) if labels_path.exists() else []
+    if labels_data is None:
+        labels_data = json.loads(labels_path.read_text()) if labels_path.exists() else []
 
     for lc in creates:
         try:
@@ -400,7 +390,7 @@ def _push_label_creates(
         except Exception as e:
             result.errors.append(f"Failed to create label '{lc.label_name}': {e}")
 
-    labels_path.write_text(json.dumps(labels_data, indent=2) + "\n")
+    atomic_write(labels_path, json.dumps(labels_data, indent=2) + "\n")
 
 
 def _push_label_deletes(

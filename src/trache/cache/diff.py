@@ -66,7 +66,7 @@ class Changeset:
 _DIFF_FIELDS = ["title", "description", "list_id", "labels", "due", "closed"]
 
 
-def _fields_equal(field_name: str, old_val: object, new_val: object) -> bool:
+def fields_equal(field_name: str, old_val: object, new_val: object) -> bool:
     """Typed comparison per field."""
     if field_name == "labels":
         return sorted(old_val) == sorted(new_val)
@@ -251,7 +251,7 @@ def compute_diff(cache_dir: Path) -> Changeset:
         for f in _DIFF_FIELDS:
             old_val = getattr(clean_card, f)
             new_val = getattr(working_card, f)
-            if not _fields_equal(f, old_val, new_val):
+            if not fields_equal(f, old_val, new_val):
                 field_changes[f] = (str(old_val), str(new_val))
 
         # Check checklist changes

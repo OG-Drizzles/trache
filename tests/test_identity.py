@@ -73,6 +73,23 @@ class TestInjectBlock:
         assert "My description" in result
         assert result.index("Card Identifier") < result.index("My description")
 
+    def test_strip_double_separator_regression(self) -> None:
+        """F-013: Double --- separators from prior bug should still be stripped cleanly."""
+        desc = (
+            "---\n"
+            "# **Card Identifier**\n"
+            "- **Card Name:** Test\n"
+            "- **Created Date:** 2026-03-13 01:22 UTC\n"
+            "- **Modified Date:** 2026-03-13 04:10 UTC\n"
+            "- **Last Activity:** 2026-03-13 05:30 UTC\n"
+            "- **Unique ID:** FEDCBA\n"
+            "---\n"
+            "\n"
+            "Body after single separator."
+        )
+        result = strip_block(desc)
+        assert result == "Body after single separator."
+
     def test_inject_replaces_existing(self) -> None:
         existing = (
             "---\n"

@@ -14,9 +14,8 @@ from typing import Optional
 BLOCK_SEPARATOR = "\n\n"
 
 # Regex to detect and strip identifier block from Trello descriptions.
-# The trailing (?:---\s*\n)* cleans up extra --- separators from a prior bug.
 _BLOCK_PATTERN = re.compile(
-    r"^---\s*\n# \*\*Card Identifier\*\*\n.*?^---\s*\n(?:---\s*\n)*",
+    r"^---\s*\n# \*\*Card Identifier\*\*\n.*?^---\s*\n",
     re.MULTILINE | re.DOTALL,
 )
 

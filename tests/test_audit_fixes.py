@@ -14,35 +14,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from trache.cache.models import Board, Card, Label
+from trache.cache.models import Card
 from trache.cache.store import read_card_file, write_card_file
-from trache.config import TracheConfig, ensure_cache_structure
 from trache.sync.pull import pull_full_board
 from trache.sync.push import push_changes
 
-
-def _make_client(cards, lists=None, checklists=None, labels=None):
-    client = MagicMock()
-    client.get_board.return_value = Board(id="board1", name="Test Board", url="")
-    client.get_board_lists.return_value = lists or []
-    client.get_board_cards.return_value = cards
-    client.get_board_checklists.return_value = checklists or []
-    client.get_board_labels.return_value = labels or [Label(id="lbl1", name="bug", color="red")]
-    return client
-
-
-def _setup(tmp_path):
-    cache_dir = tmp_path / ".trache"
-    ensure_cache_structure(cache_dir)
-    config = TracheConfig(board_id="board1")
-    config.save(cache_dir)
-    return cache_dir, config
+from conftest import make_mock_client, setup_cache
 
 
 class TestLabelOrderDoesNotBumpContentModifiedAt:
     def test_label_reorder_preserves_content_modified_at(self, tmp_path: Path) -> None:
         """Labels in a different order should NOT bump content_modified_at."""
-        cache_dir, config = _setup(tmp_path)
+        cache_dir, config = setup_cache(tmp_path)
 
         original_time = datetime(2026, 3, 10, 12, 0, 0, tzinfo=timezone.utc)
         card = Card(
@@ -57,7 +40,7 @@ class TestLabelOrderDoesNotBumpContentModifiedAt:
         )
 
         # First pull
-        client = _make_client([card])
+        client = make_mock_client([card])
         pull_full_board(config, client, cache_dir, force=True)
 
         stored = read_card_file(cache_dir / "clean" / "cards" / "67abc123def4567890fedcba.md")
@@ -75,7 +58,7 @@ class TestLabelOrderDoesNotBumpContentModifiedAt:
             content_modified_at=later_time,
             last_activity=later_time,
         )
-        client2 = _make_client([card_v2])
+        client2 = make_mock_client([card_v2])
         pull_full_board(config, client2, cache_dir, force=True)
 
         stored2 = read_card_file(cache_dir / "clean" / "cards" / "67abc123def4567890fedcba.md")
@@ -85,7 +68,7 @@ class TestLabelOrderDoesNotBumpContentModifiedAt:
 class TestLabelOnlyPushNoRedundantDesc:
     def test_label_only_change_does_not_send_desc(self, tmp_path: Path) -> None:
         """When only labels change, desc should NOT be included in update_card."""
-        cache_dir, config = _setup(tmp_path)
+        cache_dir, config = setup_cache(tmp_path)
 
         card = Card(
             id="67abc123def4567890fedcba",
@@ -139,7 +122,7 @@ class TestLabelOnlyPushNoRedundantDesc:
 class TestRepullFailureSurfaced:
     def test_repull_failure_appears_in_errors(self, tmp_path: Path) -> None:
         """Re-pull failure after push must surface in result.errors."""
-        cache_dir, config = _setup(tmp_path)
+        cache_dir, config = setup_cache(tmp_path)
 
         card = Card(
             id="67abc123def4567890fedcba",
@@ -166,7 +149,7 @@ class TestRepullFailureSurfaced:
 class TestOldChecklistsMigration:
     def test_old_checklists_dir_removed_on_pull(self, tmp_path: Path) -> None:
         """Old flat checklists/ dir is cleaned up during full board pull."""
-        cache_dir, config = _setup(tmp_path)
+        cache_dir, config = setup_cache(tmp_path)
 
         # Create old-style flat checklists/ dir
         old_cl_dir = cache_dir / "checklists"
@@ -181,7 +164,7 @@ class TestOldChecklistsMigration:
             list_id="list1",
             title="Card",
         )
-        client = _make_client([card])
+        client = make_mock_client([card])
         pull_full_board(config, client, cache_dir, force=True)
 
         # Old dir should be gone

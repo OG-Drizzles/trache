@@ -36,11 +36,13 @@ def _load_checklists_for_card(card_identifier: str) -> tuple[str, list[dict]]:
 
 def _save_checklists_for_card(card_id: str, checklists: list[dict]) -> None:
     """Write checklists back to the working directory."""
+    from trache.cache._atomic import atomic_write
+
     cache_dir = _cache_dir()
     cl_dir = cache_dir / "working" / "checklists"
     cl_dir.mkdir(parents=True, exist_ok=True)
     cl_path = cl_dir / f"{card_id}.json"
-    cl_path.write_text(json.dumps(checklists, indent=2, default=str) + "\n")
+    atomic_write(cl_path, json.dumps(checklists, indent=2, default=str) + "\n")
 
 
 def _update_card_content_modified_at(card_id: str) -> None:

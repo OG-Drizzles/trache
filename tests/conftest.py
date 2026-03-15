@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
-from trache.cache.models import Card, Checklist, ChecklistItem, TrelloList
+from trache.cache.models import Board, Card, Checklist, ChecklistItem, Label, TrelloList
 from trache.config import TracheConfig, ensure_cache_structure
 
 
@@ -61,3 +63,42 @@ def sample_lists() -> list[TrelloList]:
         TrelloList(id="345678901bcdef1234567890", name="In Progress", board_id="abc123", pos=2),
         TrelloList(id="456789012cdef12345678901", name="Done", board_id="abc123", pos=3),
     ]
+
+
+def make_mock_client(cards, lists=None, checklists=None, labels=None):
+    """Create a mock TrelloClient with standard board-level responses.
+
+    Args:
+        cards: List of Card objects for get_board_cards
+        lists: List of TrelloList objects for get_board_lists (default: empty)
+        checklists: List of Checklist objects for get_board_checklists (default: empty)
+        labels: List of Label objects for get_board_labels (default: [bug/red])
+    """
+    client = MagicMock()
+    client.get_board.return_value = Board(id="board1", name="Test Board", url="")
+    client.get_board_lists.return_value = lists or []
+    client.get_board_cards.return_value = cards
+    client.get_board_checklists.return_value = checklists or []
+    client.get_board_labels.return_value = labels or [Label(id="lbl1", name="bug", color="red")]
+    return client
+
+
+def setup_cache(tmp_path: Path) -> tuple[Path, TracheConfig]:
+    """Create a minimal cache directory with config for testing."""
+    cache_dir = tmp_path / ".trache"
+    ensure_cache_structure(cache_dir)
+    config = TracheConfig(board_id="board1")
+    config.save(cache_dir)
+    return cache_dir, config
+
+
+@pytest.fixture(autouse=True)
+def _reset_board_override():
+    """Reset the board override after each test."""
+    yield
+    from trache.cli import _context
+
+    if hasattr(_context, "_board_local"):
+        _context._board_local.override = None
+    else:
+        _context._active_board_override = None

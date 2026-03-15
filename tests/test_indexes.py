@@ -13,6 +13,7 @@ from trache.cache.index import (
     remove_card_from_index,
     resolve_card_id,
     resolve_list_id,
+    update_cards_in_index,
 )
 from trache.cache.models import Card, TrelloList
 
@@ -180,3 +181,58 @@ class TestListIndex:
 
         with pytest.raises(KeyError):
             resolve_list_id("Nonexistent", index_dir)
+
+
+class TestBatchIndex:
+    """O-001: update_cards_in_index batch correctness."""
+
+    def test_batch_adds_multiple_cards(self, cache_dir: Path) -> None:
+        index_dir = cache_dir / "indexes"
+        build_card_indexes([], index_dir)
+
+        cards = [
+            Card(
+                id="67abc123def4567890fedcba",
+                board_id="abc123",
+                list_id="list1",
+                title="Card A",
+            ),
+            Card(
+                id="77abc123def4567890fedcbb",
+                board_id="abc123",
+                list_id="list1",
+                title="Card B",
+            ),
+        ]
+        update_cards_in_index(cards, index_dir)
+
+        by_id = load_index(index_dir, "cards_by_id")
+        assert len(by_id) == 2
+        assert by_id["67abc123def4567890fedcba"]["title"] == "Card A"
+        assert by_id["77abc123def4567890fedcbb"]["title"] == "Card B"
+
+        by_list = load_index(index_dir, "cards_by_list")
+        assert len(by_list["list1"]) == 2
+
+    def test_batch_updates_existing_cards(self, sample_card: Card, cache_dir: Path) -> None:
+        index_dir = cache_dir / "indexes"
+        build_card_indexes([sample_card], index_dir)
+
+        # Move card to new list
+        sample_card.list_id = "new_list_id_000000000000"
+        sample_card.title = "Updated Title"
+        update_cards_in_index([sample_card], index_dir)
+
+        by_id = load_index(index_dir, "cards_by_id")
+        assert by_id[sample_card.id]["title"] == "Updated Title"
+        assert by_id[sample_card.id]["list_id"] == "new_list_id_000000000000"
+
+    def test_unindexed_card_raises_keyerror(self, cache_dir: Path) -> None:
+        """O-003: Unindexed card produces KeyError with helpful message."""
+        import pytest
+
+        index_dir = cache_dir / "indexes"
+        build_card_indexes([], index_dir)
+
+        with pytest.raises(KeyError, match="not found on this board"):
+            resolve_card_id("ABCDEF", index_dir)
