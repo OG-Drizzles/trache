@@ -133,7 +133,7 @@ class TestContentModifiedAtPreservation:
 
     def test_local_edit_updates_content_modified_at(self, tmp_path: Path) -> None:
         """Local title edit updates content_modified_at."""
-        from trache.cache.index import build_index
+        from conftest import seed_board
         from trache.cache.working import edit_title
 
         cache_dir, config = setup_cache(tmp_path)
@@ -148,7 +148,7 @@ class TestContentModifiedAtPreservation:
         )
         write_card(card, "clean", cache_dir)
         write_card(card, "working", cache_dir)
-        build_index([card], lists, cache_dir / "indexes")
+        seed_board([card], lists, cache_dir)
 
         original_modified = card.content_modified_at
         updated = edit_title(card.uid6, "New Title", cache_dir)
@@ -156,7 +156,7 @@ class TestContentModifiedAtPreservation:
 
     def test_local_label_change_updates_content_modified_at(self, tmp_path: Path) -> None:
         """Label add/remove locally updates content_modified_at."""
-        from trache.cache.index import build_index
+        from conftest import seed_board
 
         cache_dir, config = setup_cache(tmp_path)
         lists = [TrelloList(id="list1", name="To Do", board_id="board1", pos=1)]
@@ -171,7 +171,7 @@ class TestContentModifiedAtPreservation:
         )
         write_card(card, "clean", cache_dir)
         write_card(card, "working", cache_dir)
-        build_index([card], lists, cache_dir / "indexes")
+        seed_board([card], lists, cache_dir)
 
         # Manually edit label in working copy (simulating what a hypothetical edit_labels would do)
         from datetime import timezone as tz
@@ -187,7 +187,7 @@ class TestContentModifiedAtPreservation:
 
     def test_list_move_updates_content_modified_at(self, tmp_path: Path) -> None:
         """Moving a card to a different list updates content_modified_at."""
-        from trache.cache.index import build_index
+        from conftest import seed_board
         from trache.cache.working import move_card
 
         cache_dir, config = setup_cache(tmp_path)
@@ -205,7 +205,7 @@ class TestContentModifiedAtPreservation:
         )
         write_card(card, "clean", cache_dir)
         write_card(card, "working", cache_dir)
-        build_index([card], lists, cache_dir / "indexes")
+        seed_board([card], lists, cache_dir)
 
         original = card.content_modified_at
         moved = move_card(card.uid6, "Done", cache_dir)

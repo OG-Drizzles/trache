@@ -329,8 +329,8 @@ class TestPushDeletedCardCleanup:
         with pytest.raises(FileNotFoundError):
             read_card(sample_card.id, "clean", cache_dir)
         # Index should no longer contain the card
-        from trache.cache.index import load_index
-        cards_by_id = load_index(cache_dir / "indexes", "cards_by_id")
+        from trache.cache.db import load_cards_index
+        cards_by_id = load_cards_index(cache_dir)
         assert sample_card.id not in cards_by_id
 
     def test_push_deleted_card_idempotent(self, tmp_path: Path, sample_card: Card) -> None:

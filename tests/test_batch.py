@@ -16,10 +16,11 @@ from trache.cache.db import (
     write_checklists_raw,
     write_lists,
 )
-from trache.cache.index import build_index
 from trache.cache.models import Card, TrelloList
 from trache.cli.app import app
 from trache.config import TracheConfig, ensure_cache_structure
+
+from conftest import seed_board
 
 runner = CliRunner()
 
@@ -39,7 +40,7 @@ def _setup_batch(tmp_path: Path, monkeypatch) -> Path:
     write_card(card, "clean", cache_dir)
     write_card(card, "working", cache_dir)
     write_lists(lists, cache_dir)
-    build_index([card], lists, cache_dir / "indexes")
+    seed_board([card], lists, cache_dir)
 
     cl_data = [{"id": "cl001", "name": "MVP", "card_id": card.id, "pos": 1, "items": [
         {"id": "ci001", "name": "Item 1", "state": "incomplete", "pos": 1},

@@ -17,3 +17,6 @@ venv/
 .ruff_cache/
 htmlcov/
 .coverage
+.claude/
+docs/
+CLAUDE.md

@@ -7,10 +7,10 @@ from pathlib import Path
 import pytest
 
 from trache.cache.diff import compute_diff
-from trache.cache.index import build_index, resolve_card_id
+from trache.cache.db import read_card, resolve_card_id, write_card, write_checklists_raw
 from trache.cache.models import Card, TrelloList
-from trache.cache.db import read_card, write_card
-from trache.cache.db import write_checklists_raw
+
+from conftest import seed_board
 from trache.cache.working import (
     add_checklist_item,
     archive_card,
@@ -30,7 +30,7 @@ class TestEditTitle:
     ) -> None:
         write_card(sample_card, "clean", cache_dir)
         write_card(sample_card, "working", cache_dir)
-        build_index([sample_card], sample_lists, cache_dir / "indexes")
+        seed_board([sample_card], sample_lists, cache_dir)
 
         old_modified = sample_card.content_modified_at
         card = edit_title(sample_card.uid6, "New Title", cache_dir)
@@ -52,7 +52,7 @@ class TestEditDescription:
     ) -> None:
         write_card(sample_card, "clean", cache_dir)
         write_card(sample_card, "working", cache_dir)
-        build_index([sample_card], sample_lists, cache_dir / "indexes")
+        seed_board([sample_card], sample_lists, cache_dir)
 
         card = edit_description(sample_card.uid6, "Updated description", cache_dir)
         assert card.description == "Updated description"
@@ -68,7 +68,7 @@ class TestMoveCard:
     ) -> None:
         write_card(sample_card, "clean", cache_dir)
         write_card(sample_card, "working", cache_dir)
-        build_index([sample_card], sample_lists, cache_dir / "indexes")
+        seed_board([sample_card], sample_lists, cache_dir)
 
         new_list = sample_lists[1]  # "In Progress"
         card = move_card(sample_card.uid6, new_list.name, cache_dir)
@@ -80,7 +80,7 @@ class TestCreateCard:
     def test_create_card_exists_in_working_not_clean(
         self, sample_lists: list[TrelloList], cache_dir: Path
     ) -> None:
-        build_index([], sample_lists, cache_dir / "indexes")
+        seed_board([], sample_lists, cache_dir)
 
         card = create_card("To Do", "New Card", cache_dir, "board1", "Test desc")
 
@@ -100,16 +100,16 @@ class TestCreateCard:
         self, sample_lists: list[TrelloList], cache_dir: Path
     ) -> None:
         """F-003: temp card should be immediately resolvable by UID6."""
-        build_index([], sample_lists, cache_dir / "indexes")
+        seed_board([], sample_lists, cache_dir)
 
         card = create_card("To Do", "Resolvable Card", cache_dir, "board1")
 
         # Resolve by temp ID
-        resolved = resolve_card_id(card.id, cache_dir / "indexes")
+        resolved = resolve_card_id(card.id, cache_dir)
         assert resolved == card.id
 
         # Resolve by UID6
-        resolved = resolve_card_id(card.uid6, cache_dir / "indexes")
+        resolved = resolve_card_id(card.uid6, cache_dir)
         assert resolved == card.id
 
 
@@ -119,7 +119,7 @@ class TestArchiveCard:
     ) -> None:
         write_card(sample_card, "clean", cache_dir)
         write_card(sample_card, "working", cache_dir)
-        build_index([sample_card], sample_lists, cache_dir / "indexes")
+        seed_board([sample_card], sample_lists, cache_dir)
 
         card = archive_card(sample_card.uid6, cache_dir)
         assert card.closed is True
@@ -132,7 +132,7 @@ def _seed_card_with_checklist(
     """Helper: write card + checklist to cache for checklist mutation tests."""
     write_card(sample_card, "clean", cache_dir)
     write_card(sample_card, "working", cache_dir)
-    build_index([sample_card], sample_lists, cache_dir / "indexes")
+    seed_board([sample_card], sample_lists, cache_dir)
     cl_data = [{
         "id": "cl001", "name": "MVP", "card_id": sample_card.id, "pos": 1,
         "items": [

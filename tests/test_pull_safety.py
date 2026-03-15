@@ -11,13 +11,12 @@ import pytest
 import json
 
 from trache.cache.db import read_card, write_card, write_lists
-from trache.cache.index import build_index
 from trache.cache.models import Board, Card, Label, TrelloList
 from trache.config import TracheConfig, ensure_cache_structure
 from trache.sync.pull import pull_full_board
 from trache.sync.push import push_changes
 
-from conftest import setup_cache
+from conftest import seed_board, setup_cache
 
 
 def _make_client(cards, lists=None, activity=None):
@@ -217,7 +216,7 @@ def _setup_sync_cli(tmp_path: Path, monkeypatch) -> Path:
     card = Card(id="67abc123def4567890fedcba", board_id="board1", list_id="list1", title="Card")
     write_card(card, "clean", cache_dir)
     write_card(card, "working", cache_dir)
-    build_index([card], lists, cache_dir / "indexes")
+    seed_board([card], lists, cache_dir)
     return cache_dir
 
 

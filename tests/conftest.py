@@ -65,6 +65,14 @@ def sample_lists() -> list[TrelloList]:
     ]
 
 
+def seed_board(cards: list[Card], lists: list[TrelloList], cache_dir: Path) -> None:
+    """Seed the database with cards (working copy) and lists. Replaces old build_index()."""
+    from trache.cache.db import write_cards_batch, write_lists
+
+    write_cards_batch(cards, "working", cache_dir)
+    write_lists(lists, cache_dir)
+
+
 def make_mock_client(cards, lists=None, checklists=None, labels=None):
     """Create a mock TrelloClient with standard board-level responses.
 

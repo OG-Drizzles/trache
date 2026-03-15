@@ -7,9 +7,10 @@ from unittest.mock import MagicMock
 
 from trache.cache.db import read_checklists_raw, write_card, write_checklists_raw
 from trache.cache.diff import compute_diff
-from trache.cache.index import build_index
 from trache.cache.models import Card, ChecklistItem, TrelloList
 from trache.config import TracheConfig, ensure_cache_structure
+
+from conftest import seed_board
 
 
 def _setup_card_with_checklists(cache_dir: Path) -> tuple[Card, list[dict]]:
@@ -24,7 +25,7 @@ def _setup_card_with_checklists(cache_dir: Path) -> tuple[Card, list[dict]]:
     lists = [TrelloList(id="list1", name="To Do", board_id="board1", pos=1)]
     write_card(card, "clean", cache_dir)
     write_card(card, "working", cache_dir)
-    build_index([card], lists, cache_dir / "indexes")
+    seed_board([card], lists, cache_dir)
 
     cl_data = [
         {
@@ -126,7 +127,7 @@ class TestChecklistPerCardFormat:
         lists = [TrelloList(id="list1", name="To Do", board_id="board1", pos=1)]
         write_card(card, "clean", cache_dir)
         write_card(card, "working", cache_dir)
-        build_index([card], lists, cache_dir / "indexes")
+        seed_board([card], lists, cache_dir)
 
         cl_data = [
             {

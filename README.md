@@ -6,7 +6,7 @@ Trache gives your AI agent (or you) a local cache of a Trello board with Git-sty
 
 ```
 Reading one card via MCP/API:  ~4,000 tokens + network round-trip
-Reading one card via trache:   one local file read, zero tokens wasted
+Reading one card via trache:   one local SQLite read, zero tokens wasted
 ```
 
 > **Using an AI agent?** Run `trache agents` after setup for agent-specific instructions, or `trache agents --reference` for a compact command cheat-sheet.
@@ -84,8 +84,8 @@ pull → discover → read → mutate → status/diff → push
 ```
 
 1. **`trache pull`** — fetch board data from Trello into local cache
-2. **`trache card list`** — discover cards (reads local index, no API call)
-3. **`trache card show <uid6>`** — read a single card (reads one local file)
+2. **`trache card list`** — discover cards (reads local SQLite cache, no API call)
+3. **`trache card show <uid6>`** — read a single card (one local query)
 4. **Mutate locally** — edit title, description, labels, checklists, move, create, archive
 5. **`trache status`** / **`trache diff`** — review what changed
 6. **`trache push`** — push only the changed objects to Trello
@@ -108,12 +108,14 @@ A few behaviours that aren't obvious from the happy path:
 
 | Command | Description |
 |---|---|
-| `trache init` | Initialise cache for a board (`--board-id` or `--board-url`, `--auth` for token URL) |
+| `trache init` | Initialise cache for a board (`--board-id` or `--board-url`, `--auth` for token URL, `--new` to create) |
 | `trache pull` | Pull from Trello (`--card <id>`, `--list <name>`, `--force`) |
 | `trache push` | Push local changes to Trello (`--card <id>`, `--dry-run`) |
 | `trache sync` | Push then pull (`--dry-run`, `--card <id>`) |
+| `trache stale` | Check if the board has remote changes since last pull (one API call) |
 | `trache status` | Show dirty state summary |
 | `trache diff` | Show detailed clean vs working diff |
+| `trache batch run` | Execute multiple commands from stdin (JSON output) |
 | `trache agents` | Print agent setup instructions (`--reference` for command cheat-sheet) |
 | `trache version` | Show installed version |
 
@@ -132,6 +134,16 @@ A few behaviours that aren't obvious from the happy path:
 | `trache card remove-label <id> <label>` | Remove a label from a card |
 
 All card commands accept Card ID or UID6 as the identifier.
+
+### Board Commands
+
+| Command | Description |
+|---|---|
+| `trache board list` | List all configured boards |
+| `trache board switch <alias>` | Switch the active board |
+| `trache board offboard <alias>` | Remove a board's local cache (`--yes`, `--archive`, `--force`) |
+
+Use `--board <alias>` (or `-B`) on any command to target a specific board without switching.
 
 ### Checklist Commands
 
@@ -178,10 +190,10 @@ List commands are API-direct (like comments).
 
 ## Local-First Model
 
-Trache maintains two copies of your board data:
+Trache maintains two copies of your board data in a SQLite database:
 
-- **Clean** (`.trache/clean/`) — baseline from last pull. Never edited directly.
-- **Working** (`.trache/working/`) — your editable copy. All local mutations happen here.
+- **Clean** — baseline from last pull. Never edited directly.
+- **Working** — your editable copy. All local mutations happen here.
 
 `trache status` and `trache diff` compare clean vs working to detect changes. `trache push` sends working changes to Trello and re-pulls each pushed card to reconcile.
 
@@ -223,41 +235,22 @@ Each card's Trello description is prepended with a metadata block (card name, da
 
 On re-pull, Trache preserves `content_modified_at` if content hasn't changed, even if `dateLastActivity` bumped due to non-content activity.
 
-### Discovery Index
-
-A single `index.json` in `.trache/indexes/` provides full board orientation in one read:
-
-- `cards_by_id` — card ID → title, list, UID6, modified date
-- `cards_by_uid6` — UID6 → card ID
-- `cards_by_list` — list ID → card IDs
-- `lists_by_id` — list ID → name, position
-
 ## File Layout
 
 ```
 .trache/
-  config.json                      # Board ID, auth env var names
-  state.json                       # Last pull timestamp
-  indexes/
-    index.json                     # Unified discovery index
-  clean/
-    cards/*.md                     # Baseline card files
-    checklists/<card_id>.json      # Baseline checklists (per card)
-    labels.json                    # Board labels
-    board_meta.md                  # Board name/URL
-  working/
-    cards/*.md                     # Editable card files
-    checklists/<card_id>.json      # Editable checklists (per card)
-    labels.json                    # Board labels
-    board_meta.md                  # Board name/URL
+  boards/
+    <alias>/
+      config.json       # Board ID, auth env var names
+      cache.db           # SQLite WAL store (cards, checklists, labels, lists)
+      state.json         # Last pull timestamp, board_last_activity
+  active                 # Current active board alias
 ```
 
 ## Known Limitations
 
-- **No rate limiting or retry** — avoid rapid-fire API calls.
 - **No concurrent-agent conflict resolution** — if two agents push changes to the same card, last write wins silently. Coordinate externally if sharing a board.
 - **Duplicate list names are ambiguous** — list-name targeting picks one arbitrarily. Rename duplicates or use list IDs.
-- **Card create and archive are mock-validated only** — they work in practice but don't yet have live integration tests.
 
 ## Development
 
@@ -282,8 +275,7 @@ Trache is built for Claude Code and similar AI coding agents.
 
 - **`trache agents`** — prints setup instructions for injecting trache into your agent's instruction files
 - **`trache agents --reference`** — prints a compact command reference designed for agent context windows
-- **[Claude skill](.claude/skills/trache/SKILL.md)** — full command cookbook and workflow guide
-- **`CLAUDE.md`** — agent-facing operating policy (generated by `trache init`)
+- **Machine-first output** — default output is JSON/TSV for machine consumption; set `TRACHE_HUMAN=1` for Rich-formatted human output
 
 ## License
 

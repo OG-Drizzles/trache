@@ -8,10 +8,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from trache.cache.db import read_card, read_checklists, write_card
-from trache.cache.index import build_index
 from trache.cache.models import Board, Card, Checklist, ChecklistItem, Label, TrelloList
 from trache.config import TracheConfig, ensure_cache_structure
 from trache.sync.pull import pull_card, pull_full_board, pull_list
+
+from conftest import seed_board
 
 
 def _make_mock_client(cards: list[Card], lists: list[TrelloList]) -> MagicMock:
@@ -100,7 +101,7 @@ def _seed_board(cache_dir: Path) -> tuple[Card, list[TrelloList]]:
     lists = [TrelloList(id="list1", name="To Do", board_id="board1", pos=1)]
     write_card(card, "clean", cache_dir)
     write_card(card, "working", cache_dir)
-    build_index([card], lists, cache_dir / "indexes")
+    seed_board([card], lists, cache_dir)
     return card, lists
 
 
@@ -187,7 +188,7 @@ class TestScopedDirtyGuard:
         write_card(card_a, "working", cache_dir)
         write_card(card_b, "clean", cache_dir)
         write_card(card_b, "working", cache_dir)
-        build_index([card_a, card_b], lists, cache_dir / "indexes")
+        seed_board([card_a, card_b], lists, cache_dir)
 
         # Dirty card A
         dirty_a = Card(

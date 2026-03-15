@@ -8,9 +8,10 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from trache.cache.index import build_index
 from trache.cache.models import Card, TrelloList
 from trache.cache.store import write_card_file
+
+from conftest import seed_board
 from trache.cli._context import (
     _fuzzy_match,
     list_board_names,
@@ -218,7 +219,7 @@ class TestBoardOffboard:
         )
         lists = [TrelloList(id="list1", name="To Do", board_id="board_pers_id_1234567890ab", pos=1)]
         write_card_file(card, board_dir / "working" / "cards")
-        build_index([card], lists, board_dir / "indexes")
+        seed_board([card], lists, board_dir)
 
         result = runner.invoke(app, ["board", "offboard", "personal", "--yes"])
         assert result.exit_code == 1
@@ -309,7 +310,7 @@ class TestBoardFlag:
         )
         lists = [TrelloList(id="list1", name="To Do", board_id="board_work_id_1234567890ab", pos=1)]
         write_card_file(card, board_dir / "working" / "cards")
-        build_index([card], lists, board_dir / "indexes")
+        seed_board([card], lists, board_dir)
 
         result = runner.invoke(app, ["--board", "work", "card", "list"])
         assert result.exit_code == 0

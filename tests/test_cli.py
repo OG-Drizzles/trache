@@ -7,10 +7,11 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from trache.cache.db import list_cards, read_checklists_raw, write_card, write_checklists_raw
-from trache.cache.index import build_index
 from trache.cache.models import Card, TrelloList
 from trache.cli.app import app
 from trache.config import TracheConfig, ensure_cache_structure
+
+from conftest import seed_board
 
 runner = CliRunner()
 
@@ -43,7 +44,7 @@ def _setup_cli_cache(tmp_path: Path, monkeypatch) -> Path:
     lists = [TrelloList(id="list1", name="To Do", board_id="board1", pos=1)]
     write_card(card, "clean", cache_dir)
     write_card(card, "working", cache_dir)
-    build_index([card], lists, cache_dir / "indexes")
+    seed_board([card], lists, cache_dir)
 
     cl_data = [
         {
@@ -87,7 +88,7 @@ class TestVersion:
         reset_output()
         result = runner.invoke(app, ["version"])
         assert result.exit_code == 0
-        assert "trache " in result.output and any(v in result.output for v in ["0.1.", "0.2."])
+        assert "trache " in result.output and any(v in result.output for v in ["0.1.", "0.2.", "0.3."])
 
 
 class TestStatus:
