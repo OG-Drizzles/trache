@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
+from trache.cache.db import read_checklists_raw, write_card, write_checklists_raw
 from trache.cache.diff import compute_diff
 from trache.cache.index import build_index
 from trache.cache.models import Card, ChecklistItem, TrelloList
-from trache.cache.store import write_card_file
 from trache.config import TracheConfig, ensure_cache_structure
 
 
@@ -23,8 +22,8 @@ def _setup_card_with_checklists(cache_dir: Path) -> tuple[Card, list[dict]]:
         description="Test",
     )
     lists = [TrelloList(id="list1", name="To Do", board_id="board1", pos=1)]
-    write_card_file(card, cache_dir / "clean" / "cards")
-    write_card_file(card, cache_dir / "working" / "cards")
+    write_card(card, "clean", cache_dir)
+    write_card(card, "working", cache_dir)
     build_index([card], lists, cache_dir / "indexes")
 
     cl_data = [
@@ -40,11 +39,8 @@ def _setup_card_with_checklists(cache_dir: Path) -> tuple[Card, list[dict]]:
             ],
         }
     ]
-    cl_json = json.dumps(cl_data, indent=2) + "\n"
-    (cache_dir / "clean" / "checklists").mkdir(parents=True, exist_ok=True)
-    (cache_dir / "working" / "checklists").mkdir(parents=True, exist_ok=True)
-    (cache_dir / "clean" / "checklists" / "67abc123def4567890fedcba.json").write_text(cl_json)
-    (cache_dir / "working" / "checklists" / "67abc123def4567890fedcba.json").write_text(cl_json)
+    write_checklists_raw("67abc123def4567890fedcba", cl_data, "clean", cache_dir)
+    write_checklists_raw("67abc123def4567890fedcba", cl_data, "working", cache_dir)
 
     return card, cl_data
 
@@ -54,13 +50,9 @@ class TestChecklistDirtyDetection:
         card, cl_data = _setup_card_with_checklists(cache_dir)
 
         # Modify working: mark item 1 as complete
-        working_cls = json.loads(
-            (cache_dir / "working" / "checklists" / "67abc123def4567890fedcba.json").read_text()
-        )
+        working_cls = read_checklists_raw("67abc123def4567890fedcba", "working", cache_dir)
         working_cls[0]["items"][0]["state"] = "complete"
-        (cache_dir / "working" / "checklists" / "67abc123def4567890fedcba.json").write_text(
-            json.dumps(working_cls, indent=2) + "\n"
-        )
+        write_checklists_raw("67abc123def4567890fedcba", working_cls, "working", cache_dir)
 
         changeset = compute_diff(cache_dir)
         assert not changeset.is_empty
@@ -75,13 +67,9 @@ class TestChecklistDirtyDetection:
         card, cl_data = _setup_card_with_checklists(cache_dir)
 
         # Mark item 3 (which is complete) as incomplete
-        working_cls = json.loads(
-            (cache_dir / "working" / "checklists" / "67abc123def4567890fedcba.json").read_text()
-        )
+        working_cls = read_checklists_raw("67abc123def4567890fedcba", "working", cache_dir)
         working_cls[0]["items"][2]["state"] = "incomplete"
-        (cache_dir / "working" / "checklists" / "67abc123def4567890fedcba.json").write_text(
-            json.dumps(working_cls, indent=2) + "\n"
-        )
+        write_checklists_raw("67abc123def4567890fedcba", working_cls, "working", cache_dir)
 
         changeset = compute_diff(cache_dir)
         assert not changeset.is_empty
@@ -92,15 +80,11 @@ class TestChecklistDirtyDetection:
     def test_add_item_creates_dirty_state(self, cache_dir: Path) -> None:
         card, cl_data = _setup_card_with_checklists(cache_dir)
 
-        working_cls = json.loads(
-            (cache_dir / "working" / "checklists" / "67abc123def4567890fedcba.json").read_text()
-        )
+        working_cls = read_checklists_raw("67abc123def4567890fedcba", "working", cache_dir)
         working_cls[0]["items"].append(
             {"id": "temp_newitem", "name": "New Item", "state": "incomplete", "pos": 4}
         )
-        (cache_dir / "working" / "checklists" / "67abc123def4567890fedcba.json").write_text(
-            json.dumps(working_cls, indent=2) + "\n"
-        )
+        write_checklists_raw("67abc123def4567890fedcba", working_cls, "working", cache_dir)
 
         changeset = compute_diff(cache_dir)
         assert not changeset.is_empty
@@ -111,13 +95,9 @@ class TestChecklistDirtyDetection:
     def test_remove_item_creates_dirty_state(self, cache_dir: Path) -> None:
         card, cl_data = _setup_card_with_checklists(cache_dir)
 
-        working_cls = json.loads(
-            (cache_dir / "working" / "checklists" / "67abc123def4567890fedcba.json").read_text()
-        )
+        working_cls = read_checklists_raw("67abc123def4567890fedcba", "working", cache_dir)
         working_cls[0]["items"].pop(0)  # Remove first item
-        (cache_dir / "working" / "checklists" / "67abc123def4567890fedcba.json").write_text(
-            json.dumps(working_cls, indent=2) + "\n"
-        )
+        write_checklists_raw("67abc123def4567890fedcba", working_cls, "working", cache_dir)
 
         changeset = compute_diff(cache_dir)
         assert not changeset.is_empty
@@ -128,13 +108,9 @@ class TestChecklistDirtyDetection:
     def test_rename_item_creates_dirty_state(self, cache_dir: Path) -> None:
         card, cl_data = _setup_card_with_checklists(cache_dir)
 
-        working_cls = json.loads(
-            (cache_dir / "working" / "checklists" / "67abc123def4567890fedcba.json").read_text()
-        )
+        working_cls = read_checklists_raw("67abc123def4567890fedcba", "working", cache_dir)
         working_cls[0]["items"][0]["name"] = "Renamed Item"
-        (cache_dir / "working" / "checklists" / "67abc123def4567890fedcba.json").write_text(
-            json.dumps(working_cls, indent=2) + "\n"
-        )
+        write_checklists_raw("67abc123def4567890fedcba", working_cls, "working", cache_dir)
 
         changeset = compute_diff(cache_dir)
         assert not changeset.is_empty
@@ -145,11 +121,11 @@ class TestChecklistDirtyDetection:
 
 class TestChecklistPerCardFormat:
     def test_per_card_file_contains_all_checklists(self, cache_dir: Path) -> None:
-        """Verify per-card JSON contains all checklists for that card."""
+        """Verify per-card DB entry contains all checklists for that card."""
         card = Card(id="67abc123def4567890fedcba", board_id="board1", list_id="list1", title="Card")
         lists = [TrelloList(id="list1", name="To Do", board_id="board1", pos=1)]
-        write_card_file(card, cache_dir / "clean" / "cards")
-        write_card_file(card, cache_dir / "working" / "cards")
+        write_card(card, "clean", cache_dir)
+        write_card(card, "working", cache_dir)
         build_index([card], lists, cache_dir / "indexes")
 
         cl_data = [
@@ -162,15 +138,10 @@ class TestChecklistPerCardFormat:
                 "card_id": "67abc123def4567890fedcba", "pos": 2, "items": [],
             },
         ]
-        (cache_dir / "clean" / "checklists").mkdir(parents=True, exist_ok=True)
-        (cache_dir / "working" / "checklists").mkdir(parents=True, exist_ok=True)
-        cl_json = json.dumps(cl_data, indent=2)
-        (cache_dir / "clean" / "checklists" / "67abc123def4567890fedcba.json").write_text(cl_json)
-        (cache_dir / "working" / "checklists" / "67abc123def4567890fedcba.json").write_text(cl_json)
+        write_checklists_raw("67abc123def4567890fedcba", cl_data, "clean", cache_dir)
+        write_checklists_raw("67abc123def4567890fedcba", cl_data, "working", cache_dir)
 
-        loaded = json.loads(
-            (cache_dir / "working" / "checklists" / "67abc123def4567890fedcba.json").read_text()
-        )
+        loaded = read_checklists_raw("67abc123def4567890fedcba", "working", cache_dir)
         assert len(loaded) == 2
         assert loaded[0]["name"] == "MVP"
         assert loaded[1]["name"] == "Polish"
@@ -185,8 +156,8 @@ class TestChecklistPush:
         config.save(cache_dir)
 
         card = Card(id="67abc123def4567890fedcba", board_id="board1", list_id="list1", title="Card")
-        write_card_file(card, cache_dir / "clean" / "cards")
-        write_card_file(card, cache_dir / "working" / "cards")
+        write_card(card, "clean", cache_dir)
+        write_card(card, "working", cache_dir)
 
         cl_data = [
             {
@@ -194,18 +165,16 @@ class TestChecklistPush:
                 "items": [{"id": "ci001", "name": "Item 1", "state": "incomplete", "pos": 1}],
             }
         ]
-        (cache_dir / "clean" / "checklists").mkdir(parents=True, exist_ok=True)
-        (cache_dir / "working" / "checklists").mkdir(parents=True, exist_ok=True)
-        (cache_dir / "clean" / "checklists" / "67abc123def4567890fedcba.json").write_text(
-            json.dumps(cl_data, indent=2)
-        )
+        write_checklists_raw("67abc123def4567890fedcba", cl_data, "clean", cache_dir)
 
         # Modify working checklist
-        working_cl = json.loads(json.dumps(cl_data))
-        working_cl[0]["items"][0]["state"] = "complete"
-        (cache_dir / "working" / "checklists" / "67abc123def4567890fedcba.json").write_text(
-            json.dumps(working_cl, indent=2)
-        )
+        working_cl = [
+            {
+                "id": "cl001", "name": "MVP", "card_id": "67abc123def4567890fedcba", "pos": 1,
+                "items": [{"id": "ci001", "name": "Item 1", "state": "complete", "pos": 1}],
+            }
+        ]
+        write_checklists_raw("67abc123def4567890fedcba", working_cl, "working", cache_dir)
 
         client = MagicMock()
         client.update_card.return_value = card
@@ -228,8 +197,8 @@ class TestChecklistPush:
         config.save(cache_dir)
 
         card = Card(id="67abc123def4567890fedcba", board_id="board1", list_id="list1", title="Card")
-        write_card_file(card, cache_dir / "clean" / "cards")
-        write_card_file(card, cache_dir / "working" / "cards")
+        write_card(card, "clean", cache_dir)
+        write_card(card, "working", cache_dir)
 
         cl_data = [
             {
@@ -237,19 +206,15 @@ class TestChecklistPush:
                 "items": [],
             }
         ]
-        (cache_dir / "clean" / "checklists").mkdir(parents=True, exist_ok=True)
-        (cache_dir / "working" / "checklists").mkdir(parents=True, exist_ok=True)
-        (cache_dir / "clean" / "checklists" / "67abc123def4567890fedcba.json").write_text(
-            json.dumps(cl_data, indent=2)
-        )
+        write_checklists_raw("67abc123def4567890fedcba", cl_data, "clean", cache_dir)
 
-        working_cl = json.loads(json.dumps(cl_data))
-        working_cl[0]["items"].append(
-            {"id": "temp_new", "name": "New Item", "state": "incomplete", "pos": 1}
-        )
-        (cache_dir / "working" / "checklists" / "67abc123def4567890fedcba.json").write_text(
-            json.dumps(working_cl, indent=2)
-        )
+        working_cl = [
+            {
+                "id": "cl001", "name": "MVP", "card_id": "67abc123def4567890fedcba", "pos": 1,
+                "items": [{"id": "temp_new", "name": "New Item", "state": "incomplete", "pos": 1}],
+            }
+        ]
+        write_checklists_raw("67abc123def4567890fedcba", working_cl, "working", cache_dir)
 
         client = MagicMock()
         client.update_card.return_value = card
@@ -271,8 +236,8 @@ class TestChecklistPush:
         config.save(cache_dir)
 
         card = Card(id="67abc123def4567890fedcba", board_id="board1", list_id="list1", title="Card")
-        write_card_file(card, cache_dir / "clean" / "cards")
-        write_card_file(card, cache_dir / "working" / "cards")
+        write_card(card, "clean", cache_dir)
+        write_card(card, "working", cache_dir)
 
         cl_data = [
             {
@@ -280,18 +245,16 @@ class TestChecklistPush:
                 "items": [{"id": "ci001", "name": "Item 1", "state": "incomplete", "pos": 1}],
             }
         ]
-        (cache_dir / "clean" / "checklists").mkdir(parents=True, exist_ok=True)
-        (cache_dir / "working" / "checklists").mkdir(parents=True, exist_ok=True)
-        (cache_dir / "clean" / "checklists" / "67abc123def4567890fedcba.json").write_text(
-            json.dumps(cl_data, indent=2)
-        )
+        write_checklists_raw("67abc123def4567890fedcba", cl_data, "clean", cache_dir)
 
         # Remove the item in working
-        working_cl = json.loads(json.dumps(cl_data))
-        working_cl[0]["items"] = []
-        (cache_dir / "working" / "checklists" / "67abc123def4567890fedcba.json").write_text(
-            json.dumps(working_cl, indent=2)
-        )
+        working_cl = [
+            {
+                "id": "cl001", "name": "MVP", "card_id": "67abc123def4567890fedcba", "pos": 1,
+                "items": [],
+            }
+        ]
+        write_checklists_raw("67abc123def4567890fedcba", working_cl, "working", cache_dir)
 
         client = MagicMock()
         client.update_card.return_value = card

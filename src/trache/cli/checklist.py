@@ -2,18 +2,16 @@
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
 import typer
-from rich.console import Console
 
 from trache.cli._errors import guard_archived, handle_resolve_errors
+from trache.cli._output import get_output
 
 checklist_app = typer.Typer(no_args_is_help=True)
-console = Console()
 
 
 def _cache_dir() -> Path:
@@ -23,39 +21,33 @@ def _cache_dir() -> Path:
 
 def _load_checklists_for_card(card_identifier: str) -> tuple[str, list[dict]]:
     """Load all checklists for a card from working cache. Returns (card_id, checklists)."""
-    from trache.cache.index import resolve_card_id
+    from trache.cache.db import read_checklists_raw, resolve_card_id
 
     cache_dir = _cache_dir()
-    card_id = resolve_card_id(card_identifier, cache_dir / "indexes")
-    cl_path = cache_dir / "working" / "checklists" / f"{card_id}.json"
-
-    if cl_path.exists():
-        return card_id, json.loads(cl_path.read_text())
-    return card_id, []
+    card_id = resolve_card_id(card_identifier, cache_dir)
+    return card_id, read_checklists_raw(card_id, "working", cache_dir)
 
 
 def _save_checklists_for_card(card_id: str, checklists: list[dict]) -> None:
-    """Write checklists back to the working directory."""
-    from trache.cache._atomic import atomic_write
+    """Write checklists back to the working copy."""
+    from trache.cache.db import write_checklists_raw
 
     cache_dir = _cache_dir()
-    cl_dir = cache_dir / "working" / "checklists"
-    cl_dir.mkdir(parents=True, exist_ok=True)
-    cl_path = cl_dir / f"{card_id}.json"
-    atomic_write(cl_path, json.dumps(checklists, indent=2, default=str) + "\n")
+    write_checklists_raw(card_id, checklists, "working", cache_dir)
 
 
 def _update_card_content_modified_at(card_id: str) -> None:
     """Update the card's content_modified_at in the working copy."""
-    from trache.cache.store import read_card_file, write_card_file
+    from trache.cache.db import read_card, write_card
 
     cache_dir = _cache_dir()
-    card_path = cache_dir / "working" / "cards" / f"{card_id}.md"
-    if card_path.exists():
-        card = read_card_file(card_path)
+    try:
+        card = read_card(card_id, "working", cache_dir)
         card.content_modified_at = datetime.now(timezone.utc)
         card.dirty = True
-        write_card_file(card, cache_dir / "working" / "cards")
+        write_card(card, "working", cache_dir)
+    except FileNotFoundError:
+        pass
 
 
 @checklist_app.command("create")
@@ -66,13 +58,14 @@ def create(
     force: bool = typer.Option(False, "--force", help="Allow editing archived cards"),
 ) -> None:
     """Create a new checklist on a card (local-first, push to sync)."""
+    out = get_output()
     guard_archived(card_identifier, _cache_dir(), force=force)
     card_id, checklists = _load_checklists_for_card(card_identifier)
 
     # Check for duplicate name
     for cl in checklists:
         if cl["name"] == name:
-            console.print(f"[red]Checklist '{name}' already exists on this card[/red]")
+            out.error(f"Checklist '{name}' already exists on this card")
             raise typer.Exit(1)
 
     temp_id = f"temp_{uuid4().hex[:14]}t~"
@@ -80,35 +73,37 @@ def create(
 
     _save_checklists_for_card(card_id, checklists)
     _update_card_content_modified_at(card_id)
-    console.print(f"[green]Checklist created: {name} ({temp_id}) — push to sync[/green]")
+    if out.is_human:
+        out.human(f"[green]Checklist created: {name} ({temp_id}) — push to sync[/green]")
+    else:
+        out.json({"ok": True, "name": name, "id": temp_id})
 
 
 @checklist_app.command("show")
 @handle_resolve_errors
 def show(
     card_identifier: str = typer.Argument(help="Card ID or UID6"),
-    raw: bool = typer.Option(False, "--raw", help="Tab-separated output"),
 ) -> None:
     """Show checklists for a card."""
+    out = get_output()
     _card_id, checklists = _load_checklists_for_card(card_identifier)
 
     if not checklists:
-        if not raw:
-            console.print("[dim]No checklists[/dim]")
+        if out.is_human:
+            out.human("[dim]No checklists[/dim]")
+        else:
+            out.json([])
         return
 
-    if raw:
-        for cl in checklists:
-            print(f"# {cl['name']}")
-            for item in cl.get("items", []):
-                print(f"{item['id']}\t{item['state']}\t{item['name']}")
+    if not out.is_human:
+        out.json(checklists)
         return
 
     for cl in checklists:
-        console.print(f"\n[bold]{cl['name']}[/bold]")
+        out.human(f"\n[bold]{cl['name']}[/bold]")
         for item in cl.get("items", []):
             marker = "[green]x[/green]" if item["state"] == "complete" else "[ ]"
-            console.print(f"  {marker} {item['name']}  [dim]({item['id']})[/dim]")
+            out.human(f"  {marker} {item['name']}  [dim]({item['id']})[/dim]")
 
 
 @checklist_app.command("check")
@@ -119,6 +114,7 @@ def check(
     force: bool = typer.Option(False, "--force", help="Allow editing archived cards"),
 ) -> None:
     """Mark a checklist item as complete (local-first, push to sync)."""
+    out = get_output()
     guard_archived(card_identifier, _cache_dir(), force=force)
     card_id, checklists = _load_checklists_for_card(card_identifier)
 
@@ -135,16 +131,22 @@ def check(
             break
 
     if not found:
-        console.print(f"[red]Item {item_id} not found[/red]")
+        out.error(f"Item {item_id} not found")
         raise typer.Exit(1)
 
     if already:
-        console.print("[dim]Item already complete — no change[/dim]")
+        if out.is_human:
+            out.human("[dim]Item already complete — no change[/dim]")
+        else:
+            out.json({"ok": True, "item_id": item_id, "changed": False})
         return
 
     _save_checklists_for_card(card_id, checklists)
     _update_card_content_modified_at(card_id)
-    console.print("[green]Item marked complete (local — push to sync)[/green]")
+    if out.is_human:
+        out.human("[green]Item marked complete (local — push to sync)[/green]")
+    else:
+        out.json({"ok": True, "item_id": item_id, "changed": True})
 
 
 @checklist_app.command("uncheck")
@@ -155,6 +157,7 @@ def uncheck(
     force: bool = typer.Option(False, "--force", help="Allow editing archived cards"),
 ) -> None:
     """Mark a checklist item as incomplete (local-first, push to sync)."""
+    out = get_output()
     guard_archived(card_identifier, _cache_dir(), force=force)
     card_id, checklists = _load_checklists_for_card(card_identifier)
 
@@ -171,16 +174,22 @@ def uncheck(
             break
 
     if not found:
-        console.print(f"[red]Item {item_id} not found[/red]")
+        out.error(f"Item {item_id} not found")
         raise typer.Exit(1)
 
     if already:
-        console.print("[dim]Item already incomplete — no change[/dim]")
+        if out.is_human:
+            out.human("[dim]Item already incomplete — no change[/dim]")
+        else:
+            out.json({"ok": True, "item_id": item_id, "changed": False})
         return
 
     _save_checklists_for_card(card_id, checklists)
     _update_card_content_modified_at(card_id)
-    console.print("[yellow]Item marked incomplete (local — push to sync)[/yellow]")
+    if out.is_human:
+        out.human("[yellow]Item marked incomplete (local — push to sync)[/yellow]")
+    else:
+        out.json({"ok": True, "item_id": item_id, "changed": True})
 
 
 @checklist_app.command("add-item")
@@ -194,6 +203,7 @@ def add_item(
     force: bool = typer.Option(False, "--force", help="Allow editing archived cards"),
 ) -> None:
     """Add an item to a checklist by name (local-first, push to sync)."""
+    out = get_output()
     guard_archived(card_identifier, _cache_dir(), force=force)
     card_id, checklists = _load_checklists_for_card(card_identifier)
 
@@ -204,7 +214,7 @@ def add_item(
             break
 
     if target_cl is None:
-        console.print(f"[red]Checklist '{checklist_name}' not found for this card[/red]")
+        out.error(f"Checklist '{checklist_name}' not found for this card")
         raise typer.Exit(1)
 
     # Generate temp ID for the new item
@@ -220,7 +230,10 @@ def add_item(
 
     _save_checklists_for_card(card_id, checklists)
     _update_card_content_modified_at(card_id)
-    console.print(f"[green]Added: {text} ({temp_id}) — push to sync[/green]")
+    if out.is_human:
+        out.human(f"[green]Added: {text} ({temp_id}) — push to sync[/green]")
+    else:
+        out.json({"ok": True, "item_id": temp_id, "text": text})
 
 
 @checklist_app.command("remove-item")
@@ -231,6 +244,7 @@ def remove_item(
     force: bool = typer.Option(False, "--force", help="Allow editing archived cards"),
 ) -> None:
     """Remove an item from a checklist (local-first, push to sync)."""
+    out = get_output()
     guard_archived(card_identifier, _cache_dir(), force=force)
     card_id, checklists = _load_checklists_for_card(card_identifier)
 
@@ -245,9 +259,12 @@ def remove_item(
             break
 
     if not found:
-        console.print(f"[red]Item {item_id} not found[/red]")
+        out.error(f"Item {item_id} not found")
         raise typer.Exit(1)
 
     _save_checklists_for_card(card_id, checklists)
     _update_card_content_modified_at(card_id)
-    console.print("[yellow]Item removed (local — push to sync)[/yellow]")
+    if out.is_human:
+        out.human("[yellow]Item removed (local — push to sync)[/yellow]")
+    else:
+        out.json({"ok": True, "item_id": item_id})

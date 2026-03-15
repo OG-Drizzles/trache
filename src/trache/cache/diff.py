@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from difflib import unified_diff
 from pathlib import Path
 
-from trache.cache.store import list_card_files, read_card_file
+from trache.cache.db import (
+    list_cards,
+    read_checklists,
+    read_labels_raw,
+    resolve_list_name,
+)
 
 
 @dataclass
@@ -74,14 +78,11 @@ def fields_equal(field_name: str, old_val: object, new_val: object) -> bool:
 
 
 def _compute_checklist_changes(
-    card_id: str, clean_cl_dir: Path, working_cl_dir: Path
+    card_id: str, cache_dir: Path
 ) -> list[ChecklistChange]:
-    """Compare clean vs working checklist files for a card."""
-    clean_path = clean_cl_dir / f"{card_id}.json"
-    working_path = working_cl_dir / f"{card_id}.json"
-
-    clean_cls = json.loads(clean_path.read_text()) if clean_path.exists() else []
-    working_cls = json.loads(working_path.read_text()) if working_path.exists() else []
+    """Compare clean vs working checklists for a card."""
+    clean_cls = read_checklists(card_id, "clean", cache_dir)
+    working_cls = read_checklists(card_id, "working", cache_dir)
 
     changes: list[ChecklistChange] = []
 
@@ -89,16 +90,14 @@ def _compute_checklist_changes(
     clean_items: dict[str, dict[str, dict]] = {}
     clean_cl_names: dict[str, str] = {}
     for cl in clean_cls:
-        cl_id = cl["id"]
-        clean_cl_names[cl_id] = cl["name"]
-        clean_items[cl_id] = {item["id"]: item for item in cl.get("items", [])}
+        clean_cl_names[cl.id] = cl.name
+        clean_items[cl.id] = {item.id: {"name": item.name, "state": item.state} for item in cl.items}
 
     working_items: dict[str, dict[str, dict]] = {}
     working_cl_names: dict[str, str] = {}
     for cl in working_cls:
-        cl_id = cl["id"]
-        working_cl_names[cl_id] = cl["name"]
-        working_items[cl_id] = {item["id"]: item for item in cl.get("items", [])}
+        working_cl_names[cl.id] = cl.name
+        working_items[cl.id] = {item.id: {"name": item.name, "state": item.state} for item in cl.items}
 
     # Compare items in each checklist
     all_cl_ids = set(clean_items.keys()) | set(working_items.keys())
@@ -162,12 +161,9 @@ def _compute_checklist_changes(
 
 
 def _compute_label_changes(cache_dir: Path) -> list[LabelChange]:
-    """Compare clean vs working labels.json to find created/deleted labels."""
-    clean_path = cache_dir / "clean" / "labels.json"
-    working_path = cache_dir / "working" / "labels.json"
-
-    clean_labels = json.loads(clean_path.read_text()) if clean_path.exists() else []
-    working_labels = json.loads(working_path.read_text()) if working_path.exists() else []
+    """Compare clean vs working labels to find created/deleted labels."""
+    clean_labels = read_labels_raw("clean", cache_dir)
+    working_labels = read_labels_raw("working", cache_dir)
 
     clean_by_id = {lb["id"]: lb for lb in clean_labels}
     working_by_id = {lb["id"]: lb for lb in working_labels}
@@ -198,30 +194,23 @@ def _compute_label_changes(cache_dir: Path) -> list[LabelChange]:
 
 
 def compute_diff(cache_dir: Path) -> Changeset:
-    """Compute diff between clean and working directories."""
-    clean_dir = cache_dir / "clean" / "cards"
-    working_dir = cache_dir / "working" / "cards"
-    clean_cl_dir = cache_dir / "clean" / "checklists"
-    working_cl_dir = cache_dir / "working" / "checklists"
-
-    clean_files = {p.stem: p for p in list_card_files(clean_dir)}
-    working_files = {p.stem: p for p in list_card_files(working_dir)}
+    """Compute diff between clean and working copies."""
+    clean_cards = {c.id: c for c in list_cards("clean", cache_dir)}
+    working_cards = {c.id: c for c in list_cards("working", cache_dir)}
 
     changeset = Changeset()
 
     # Added cards (in working but not in clean)
-    for card_id in working_files.keys() - clean_files.keys():
-        card = read_card_file(working_files[card_id])
+    for card_id in working_cards.keys() - clean_cards.keys():
+        card = working_cards[card_id]
         annotations: list[str] = []
         if card.closed:
             annotations.append("archived")
         if card.list_id:
-            # Resolve list name from index if available
             try:
-                from trache.cache.index import resolve_list_name
-
-                list_name = resolve_list_name(card.list_id, cache_dir / "indexes")
-                annotations.append(f"in {list_name}")
+                list_name = resolve_list_name(card.list_id, cache_dir)
+                if list_name != card.list_id:  # resolved successfully
+                    annotations.append(f"in {list_name}")
             except (KeyError, FileNotFoundError):
                 pass
         if card.labels:
@@ -234,8 +223,8 @@ def compute_diff(cache_dir: Path) -> Changeset:
         ))
 
     # Deleted cards (in clean but not in working)
-    for card_id in clean_files.keys() - working_files.keys():
-        card = read_card_file(clean_files[card_id])
+    for card_id in clean_cards.keys() - working_cards.keys():
+        card = clean_cards[card_id]
         changeset.deleted.append(CardChange(
             card_id=card_id,
             title=card.title,
@@ -243,9 +232,9 @@ def compute_diff(cache_dir: Path) -> Changeset:
         ))
 
     # Modified cards (in both, check for changes)
-    for card_id in clean_files.keys() & working_files.keys():
-        clean_card = read_card_file(clean_files[card_id])
-        working_card = read_card_file(working_files[card_id])
+    for card_id in clean_cards.keys() & working_cards.keys():
+        clean_card = clean_cards[card_id]
+        working_card = working_cards[card_id]
 
         field_changes: dict[str, tuple[str, str]] = {}
         for f in _DIFF_FIELDS:
@@ -255,7 +244,7 @@ def compute_diff(cache_dir: Path) -> Changeset:
                 field_changes[f] = (str(old_val), str(new_val))
 
         # Check checklist changes
-        cl_changes = _compute_checklist_changes(card_id, clean_cl_dir, working_cl_dir)
+        cl_changes = _compute_checklist_changes(card_id, cache_dir)
 
         if field_changes or cl_changes:
             changeset.modified.append(CardChange(
@@ -275,6 +264,41 @@ def compute_diff(cache_dir: Path) -> Changeset:
     changeset.deleted.sort(key=lambda c: c.title)
 
     return changeset
+
+
+def serialise_changeset(changeset: Changeset) -> dict:
+    """Convert a Changeset to a structured dict for JSON output."""
+
+    def _serialise_card_change(c: CardChange) -> dict:
+        d: dict = {"uid6": c.card_id[-6:].upper(), "title": c.title}
+        if c.field_changes:
+            d["field_changes"] = {
+                k: {"old": old, "new": new} for k, (old, new) in c.field_changes.items()
+            }
+        if c.checklist_changes:
+            d["checklist_changes"] = [
+                {
+                    "checklist": cl.checklist_name,
+                    "type": cl.change_type,
+                    **({"item_id": cl.item_id} if cl.item_id else {}),
+                    **({"old": cl.old_value} if cl.old_value else {}),
+                    **({"new": cl.new_value} if cl.new_value else {}),
+                }
+                for cl in c.checklist_changes
+            ]
+        if c.annotations:
+            d["annotations"] = c.annotations
+        return d
+
+    return {
+        "modified": [_serialise_card_change(c) for c in changeset.modified],
+        "added": [_serialise_card_change(c) for c in changeset.added],
+        "deleted": [_serialise_card_change(c) for c in changeset.deleted],
+        "label_changes": [
+            {"name": lc.label_name, "color": lc.label_color, "type": lc.change_type}
+            for lc in changeset.label_changes
+        ],
+    }
 
 
 def format_diff(changeset: Changeset) -> str:

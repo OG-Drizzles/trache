@@ -1,0 +1,128 @@
+"""Tests for batch operations."""
+
+from __future__ import annotations
+
+import json
+from io import StringIO
+from pathlib import Path
+from unittest.mock import patch
+
+from typer.testing import CliRunner
+
+from trache.cache.db import (
+    read_card,
+    read_checklists_raw,
+    write_card,
+    write_checklists_raw,
+    write_lists,
+)
+from trache.cache.index import build_index
+from trache.cache.models import Card, TrelloList
+from trache.cli.app import app
+from trache.config import TracheConfig, ensure_cache_structure
+
+runner = CliRunner()
+
+
+def _setup_batch(tmp_path: Path, monkeypatch) -> Path:
+    monkeypatch.chdir(tmp_path)
+    trache_root = tmp_path / ".trache"
+    trache_root.mkdir(exist_ok=True)
+    cache_dir = trache_root / "boards" / "test"
+    ensure_cache_structure(cache_dir)
+    config = TracheConfig(board_id="board1")
+    config.save(cache_dir)
+    (trache_root / "active").write_text("test\n")
+
+    lists = [TrelloList(id="list1", name="To Do", pos=1), TrelloList(id="list2", name="Done", pos=2)]
+    card = Card(id="67abc123def4567890fedcba", board_id="board1", list_id="list1", title="Test Card")
+    write_card(card, "clean", cache_dir)
+    write_card(card, "working", cache_dir)
+    write_lists(lists, cache_dir)
+    build_index([card], lists, cache_dir / "indexes")
+
+    cl_data = [{"id": "cl001", "name": "MVP", "card_id": card.id, "pos": 1, "items": [
+        {"id": "ci001", "name": "Item 1", "state": "incomplete", "pos": 1},
+    ]}]
+    write_checklists_raw(card.id, cl_data, "clean", cache_dir)
+    write_checklists_raw(card.id, cl_data, "working", cache_dir)
+
+    return cache_dir
+
+
+class TestBatchRun:
+    def test_single_edit_title(self, tmp_path: Path, monkeypatch) -> None:
+        cache_dir = _setup_batch(tmp_path, monkeypatch)
+        input_text = 'card edit-title FEDCBA "New Title"\n'
+        result = runner.invoke(app, ["batch", "run"], input=input_text)
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert data[0]["ok"] is True
+        assert data[0]["title"] == "New Title"
+
+        # Verify in db
+        card = read_card("67abc123def4567890fedcba", "working", cache_dir)
+        assert card.title == "New Title"
+
+    def test_multiple_operations(self, tmp_path: Path, monkeypatch) -> None:
+        cache_dir = _setup_batch(tmp_path, monkeypatch)
+        input_text = (
+            'card edit-title FEDCBA "Updated"\n'
+            'card move FEDCBA Done\n'
+        )
+        result = runner.invoke(app, ["batch", "run"], input=input_text)
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data) == 2
+        assert all(d["ok"] for d in data)
+
+    def test_unknown_command_rejected(self, tmp_path: Path, monkeypatch) -> None:
+        _setup_batch(tmp_path, monkeypatch)
+        input_text = 'comment add FEDCBA "hello"\n'
+        result = runner.invoke(app, ["batch", "run"], input=input_text)
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert data[0]["ok"] is False
+        assert "non-batchable" in data[0]["error"].lower() or "Unknown" in data[0]["error"]
+
+    def test_blank_and_comment_lines_skipped(self, tmp_path: Path, monkeypatch) -> None:
+        cache_dir = _setup_batch(tmp_path, monkeypatch)
+        input_text = (
+            '# This is a comment\n'
+            '\n'
+            'card edit-title FEDCBA "New"\n'
+            '  \n'
+        )
+        result = runner.invoke(app, ["batch", "run"], input=input_text)
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert data[0]["ok"] is True
+
+    def test_error_does_not_halt_batch(self, tmp_path: Path, monkeypatch) -> None:
+        _setup_batch(tmp_path, monkeypatch)
+        input_text = (
+            'card edit-title FEDCBA "Good"\n'
+            'card edit-title ZZZZZZ "Bad"\n'
+            'card move FEDCBA Done\n'
+        )
+        result = runner.invoke(app, ["batch", "run"], input=input_text)
+        data = json.loads(result.output)
+        assert len(data) == 3
+        assert data[0]["ok"] is True
+        assert data[1]["ok"] is False
+        assert data[2]["ok"] is True
+
+    def test_checklist_check(self, tmp_path: Path, monkeypatch) -> None:
+        cache_dir = _setup_batch(tmp_path, monkeypatch)
+        input_text = 'checklist check FEDCBA ci001\n'
+        result = runner.invoke(app, ["batch", "run"], input=input_text)
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert data[0]["ok"] is True
+        assert data[0]["state"] == "complete"
+
+        # Verify in db
+        cls = read_checklists_raw("67abc123def4567890fedcba", "working", cache_dir)
+        assert cls[0]["items"][0]["state"] == "complete"

@@ -9,8 +9,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
+from trache.cache.db import read_card, write_card
 from trache.cache.models import Card, TrelloList
-from trache.cache.store import read_card_file, write_card_file
 from trache.sync.pull import pull_full_board
 
 from conftest import make_mock_client, setup_cache
@@ -37,7 +37,7 @@ class TestContentModifiedAtPreservation:
         pull_full_board(config, client, cache_dir, force=True)
 
         # Read the stored content_modified_at
-        stored = read_card_file(cache_dir / "clean" / "cards" / "67abc123def4567890fedcba.md")
+        stored = read_card("67abc123def4567890fedcba", "clean", cache_dir)
         first_pull_modified = stored.content_modified_at
 
         # Re-pull with same content but later last_activity (simulating a comment)
@@ -54,7 +54,7 @@ class TestContentModifiedAtPreservation:
         client2 = make_mock_client([card_v2])
         pull_full_board(config, client2, cache_dir, force=True)
 
-        stored2 = read_card_file(cache_dir / "clean" / "cards" / "67abc123def4567890fedcba.md")
+        stored2 = read_card("67abc123def4567890fedcba", "clean", cache_dir)
         assert stored2.content_modified_at == first_pull_modified
 
     def test_updated_on_repull_content_change(self, tmp_path: Path) -> None:
@@ -74,7 +74,7 @@ class TestContentModifiedAtPreservation:
         client = make_mock_client([card])
         pull_full_board(config, client, cache_dir, force=True)
 
-        stored = read_card_file(cache_dir / "clean" / "cards" / "67abc123def4567890fedcba.md")
+        stored = read_card("67abc123def4567890fedcba", "clean", cache_dir)
         first_pull_modified = stored.content_modified_at
 
         # Re-pull with changed title
@@ -90,7 +90,7 @@ class TestContentModifiedAtPreservation:
         client2 = make_mock_client([card_v2])
         pull_full_board(config, client2, cache_dir, force=True)
 
-        stored2 = read_card_file(cache_dir / "clean" / "cards" / "67abc123def4567890fedcba.md")
+        stored2 = read_card("67abc123def4567890fedcba", "clean", cache_dir)
         assert stored2.content_modified_at != first_pull_modified
 
     def test_comment_only_preserves_content_modified_at(self, tmp_path: Path) -> None:
@@ -110,7 +110,7 @@ class TestContentModifiedAtPreservation:
 
         client = make_mock_client([card])
         pull_full_board(config, client, cache_dir, force=True)
-        stored = read_card_file(cache_dir / "clean" / "cards" / "67abc123def4567890fedcba.md")
+        stored = read_card("67abc123def4567890fedcba", "clean", cache_dir)
         first_modified = stored.content_modified_at
 
         # Simulate: same content, but dateLastActivity bumped (comment was added)
@@ -127,7 +127,7 @@ class TestContentModifiedAtPreservation:
         client2 = make_mock_client([card_v2])
         pull_full_board(config, client2, cache_dir, force=True)
 
-        stored2 = read_card_file(cache_dir / "clean" / "cards" / "67abc123def4567890fedcba.md")
+        stored2 = read_card("67abc123def4567890fedcba", "clean", cache_dir)
         assert stored2.content_modified_at == first_modified
         assert stored2.last_activity == later_time
 
@@ -146,8 +146,8 @@ class TestContentModifiedAtPreservation:
             content_modified_at=datetime(2026, 3, 10, 12, 0, 0, tzinfo=timezone.utc),
             last_activity=datetime(2026, 3, 10, 12, 0, 0, tzinfo=timezone.utc),
         )
-        write_card_file(card, cache_dir / "clean" / "cards")
-        write_card_file(card, cache_dir / "working" / "cards")
+        write_card(card, "clean", cache_dir)
+        write_card(card, "working", cache_dir)
         build_index([card], lists, cache_dir / "indexes")
 
         original_modified = card.content_modified_at
@@ -169,8 +169,8 @@ class TestContentModifiedAtPreservation:
             content_modified_at=datetime(2026, 3, 10, 12, 0, 0, tzinfo=timezone.utc),
             last_activity=datetime(2026, 3, 10, 12, 0, 0, tzinfo=timezone.utc),
         )
-        write_card_file(card, cache_dir / "clean" / "cards")
-        write_card_file(card, cache_dir / "working" / "cards")
+        write_card(card, "clean", cache_dir)
+        write_card(card, "working", cache_dir)
         build_index([card], lists, cache_dir / "indexes")
 
         # Manually edit label in working copy (simulating what a hypothetical edit_labels would do)
@@ -181,7 +181,7 @@ class TestContentModifiedAtPreservation:
         working.labels = ["bug", "feature"]
         working.content_modified_at = datetime.now(tz.utc)
         working.dirty = True
-        write_card_file(working, cache_dir / "working" / "cards")
+        write_card(working, "working", cache_dir)
 
         assert working.content_modified_at > card.content_modified_at
 
@@ -203,8 +203,8 @@ class TestContentModifiedAtPreservation:
             content_modified_at=datetime(2026, 3, 10, 12, 0, 0, tzinfo=timezone.utc),
             last_activity=datetime(2026, 3, 10, 12, 0, 0, tzinfo=timezone.utc),
         )
-        write_card_file(card, cache_dir / "clean" / "cards")
-        write_card_file(card, cache_dir / "working" / "cards")
+        write_card(card, "clean", cache_dir)
+        write_card(card, "working", cache_dir)
         build_index([card], lists, cache_dir / "indexes")
 
         original = card.content_modified_at

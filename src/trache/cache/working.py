@@ -6,33 +6,30 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from trache.cache.index import add_card_to_index, resolve_card_id, resolve_list_id
+from trache.cache.db import (
+    list_cards,
+    read_card,
+    read_labels_raw,
+    resolve_card_id,
+    resolve_list_id,
+    write_card,
+)
 from trache.cache.models import Card
-from trache.cache.store import list_card_files, read_card_file, write_card_file
 
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _working_dir(cache_dir: Path) -> Path:
-    return cache_dir / "working" / "cards"
-
-
-def _index_dir(cache_dir: Path) -> Path:
-    return cache_dir / "indexes"
-
-
 def read_working_card(identifier: str, cache_dir: Path) -> Card:
     """Read a card from the working copy by ID or UID6."""
-    card_id = resolve_card_id(identifier, _index_dir(cache_dir))
-    path = _working_dir(cache_dir) / f"{card_id}.md"
-    return read_card_file(path)
+    card_id = resolve_card_id(identifier, cache_dir)
+    return read_card(card_id, "working", cache_dir)
 
 
 def list_working_cards(cache_dir: Path) -> list[Card]:
     """Read all cards from the working copy."""
-    return [read_card_file(p) for p in list_card_files(_working_dir(cache_dir))]
+    return list_cards("working", cache_dir)
 
 
 def edit_title(identifier: str, new_title: str, cache_dir: Path) -> Card:
@@ -41,7 +38,7 @@ def edit_title(identifier: str, new_title: str, cache_dir: Path) -> Card:
     card.title = new_title
     card.content_modified_at = _now()
     card.dirty = True
-    write_card_file(card, _working_dir(cache_dir))
+    write_card(card, "working", cache_dir)
     return card
 
 
@@ -51,19 +48,18 @@ def edit_description(identifier: str, new_desc: str, cache_dir: Path) -> Card:
     card.description = new_desc
     card.content_modified_at = _now()
     card.dirty = True
-    write_card_file(card, _working_dir(cache_dir))
+    write_card(card, "working", cache_dir)
     return card
 
 
 def move_card(identifier: str, list_identifier: str, cache_dir: Path) -> Card:
     """Move a card to a different list in the working copy."""
     card = read_working_card(identifier, cache_dir)
-    new_list_id = resolve_list_id(list_identifier, _index_dir(cache_dir))
+    new_list_id = resolve_list_id(list_identifier, cache_dir)
     card.list_id = new_list_id
     card.content_modified_at = _now()
     card.dirty = True
-    write_card_file(card, _working_dir(cache_dir))
-    add_card_to_index(card, _index_dir(cache_dir))
+    write_card(card, "working", cache_dir)
     return card
 
 
@@ -75,9 +71,8 @@ def create_card(
     description: str = "",
 ) -> Card:
     """Create a new card in the working copy."""
-    list_id = resolve_list_id(list_identifier, _index_dir(cache_dir))
+    list_id = resolve_list_id(list_identifier, cache_dir)
 
-    # Generate a temporary ID for new cards (will be replaced on push)
     temp_id = f"new_{uuid4().hex[:16]}t~"
 
     card = Card(
@@ -91,9 +86,7 @@ def create_card(
         last_activity=_now(),
         dirty=True,
     )
-    write_card_file(card, _working_dir(cache_dir))
-    # Update discovery index so temp card is immediately resolvable
-    add_card_to_index(card, _index_dir(cache_dir))
+    write_card(card, "working", cache_dir)
     return card
 
 
@@ -103,19 +96,16 @@ def archive_card(identifier: str, cache_dir: Path) -> Card:
     card.closed = True
     card.content_modified_at = _now()
     card.dirty = True
-    write_card_file(card, _working_dir(cache_dir))
+    write_card(card, "working", cache_dir)
     return card
 
 
 def _validate_label(label_name: str, cache_dir: Path) -> None:
     """Validate that a label name exists on the board. Raises ValueError if not."""
-    import json
-
-    labels_path = cache_dir / "working" / "labels.json"
-    if not labels_path.exists():
+    labels_data = read_labels_raw("working", cache_dir)
+    if not labels_data:
         return  # No labels cache — skip validation (pre-pull state)
 
-    labels_data = json.loads(labels_path.read_text())
     valid_names = [lb["name"] for lb in labels_data if lb.get("name")]
     valid_colors = list({lb["color"] for lb in labels_data if lb.get("color")})
 
@@ -131,11 +121,7 @@ def _validate_label(label_name: str, cache_dir: Path) -> None:
 
 
 def add_label(identifier: str, label_name: str, cache_dir: Path) -> tuple[Card, bool]:
-    """Add a label to a card in the working copy. Idempotent.
-
-    Returns (card, added) where added is False if label was already present.
-    Raises ValueError if the label doesn't exist on the board.
-    """
+    """Add a label to a card in the working copy. Idempotent."""
     _validate_label(label_name, cache_dir)
     card = read_working_card(identifier, cache_dir)
     if label_name in card.labels:
@@ -143,15 +129,12 @@ def add_label(identifier: str, label_name: str, cache_dir: Path) -> tuple[Card, 
     card.labels.append(label_name)
     card.content_modified_at = _now()
     card.dirty = True
-    write_card_file(card, _working_dir(cache_dir))
+    write_card(card, "working", cache_dir)
     return card, True
 
 
 def remove_label(identifier: str, label_name: str, cache_dir: Path) -> Card:
-    """Remove a label from a card in the working copy.
-
-    Raises ValueError if the label is not present.
-    """
+    """Remove a label from a card in the working copy."""
     card = read_working_card(identifier, cache_dir)
     if label_name not in card.labels:
         raise ValueError(
@@ -161,5 +144,5 @@ def remove_label(identifier: str, label_name: str, cache_dir: Path) -> Card:
     card.labels.remove(label_name)
     card.content_modified_at = _now()
     card.dirty = True
-    write_card_file(card, _working_dir(cache_dir))
+    write_card(card, "working", cache_dir)
     return card

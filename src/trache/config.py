@@ -64,12 +64,8 @@ class SyncState(BaseModel):
 
 
 def ensure_cache_structure(cache_dir: Path) -> None:
-    """Create the full cache directory structure."""
-    for subdir in [
-        "indexes",
-        "clean/cards",
-        "clean/checklists",
-        "working/cards",
-        "working/checklists",
-    ]:
-        (cache_dir / subdir).mkdir(parents=True, exist_ok=True)
+    """Create the cache structure (SQLite database)."""
+    from trache.cache.db import init_db
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    init_db(cache_dir)

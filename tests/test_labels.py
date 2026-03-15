@@ -2,33 +2,32 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from unittest.mock import MagicMock
 
 from trache.cache.diff import compute_diff
 from trache.cache.models import Card
-from trache.cache.store import write_card_file
+from trache.cache.db import write_card, write_labels_raw
 from trache.config import TracheConfig, ensure_cache_structure
 from trache.sync.push import _resolve_label_ids, push_changes
 
 
 class TestLabelDiff:
     def test_label_add_detected(self, sample_card: Card, cache_dir: Path) -> None:
-        write_card_file(sample_card, cache_dir / "clean" / "cards")
+        write_card(sample_card, "clean", cache_dir)
 
         sample_card.labels = ["bug", "priority-high", "feature"]
-        write_card_file(sample_card, cache_dir / "working" / "cards")
+        write_card(sample_card, "working", cache_dir)
 
         changeset = compute_diff(cache_dir)
         assert len(changeset.modified) == 1
         assert "labels" in changeset.modified[0].field_changes
 
     def test_label_remove_detected(self, sample_card: Card, cache_dir: Path) -> None:
-        write_card_file(sample_card, cache_dir / "clean" / "cards")
+        write_card(sample_card, "clean", cache_dir)
 
         sample_card.labels = ["bug"]
-        write_card_file(sample_card, cache_dir / "working" / "cards")
+        write_card(sample_card, "working", cache_dir)
 
         changeset = compute_diff(cache_dir)
         assert len(changeset.modified) == 1
@@ -36,10 +35,10 @@ class TestLabelDiff:
 
     def test_label_order_change_no_diff(self, sample_card: Card, cache_dir: Path) -> None:
         """F-007: labels in different order should NOT produce a diff."""
-        write_card_file(sample_card, cache_dir / "clean" / "cards")
+        write_card(sample_card, "clean", cache_dir)
 
         sample_card.labels = ["priority-high", "bug"]  # Same labels, different order
-        write_card_file(sample_card, cache_dir / "working" / "cards")
+        write_card(sample_card, "working", cache_dir)
 
         changeset = compute_diff(cache_dir)
         assert changeset.is_empty
@@ -54,7 +53,7 @@ class TestLabelResolve:
             {"id": "lbl1", "name": "bug", "color": "red"},
             {"id": "lbl2", "name": "feature", "color": "blue"},
         ]
-        (cache_dir / "working" / "labels.json").write_text(json.dumps(labels_data))
+        write_labels_raw(labels_data, "working", cache_dir)
 
         result = _resolve_label_ids(["bug", "feature"], cache_dir)
         assert result == ["lbl1", "lbl2"]
@@ -67,7 +66,7 @@ class TestLabelResolve:
             {"id": "lbl1", "name": "", "color": "red"},
             {"id": "lbl2", "name": "feature", "color": "blue"},
         ]
-        (cache_dir / "working" / "labels.json").write_text(json.dumps(labels_data))
+        write_labels_raw(labels_data, "working", cache_dir)
 
         result = _resolve_label_ids(["red"], cache_dir)
         assert result == ["lbl1"]
@@ -82,7 +81,7 @@ class TestLabelResolve:
             {"id": "lbl1", "name": "", "color": "red"},
             {"id": "lbl2", "name": "", "color": "red"},
         ]
-        (cache_dir / "working" / "labels.json").write_text(json.dumps(labels_data))
+        write_labels_raw(labels_data, "working", cache_dir)
 
         with pytest.raises(ValueError, match="Ambiguous"):
             _resolve_label_ids(["red"], cache_dir)
@@ -94,7 +93,7 @@ class TestLabelResolve:
         ensure_cache_structure(cache_dir)
 
         labels_data = [{"id": "lbl1", "name": "bug", "color": "red"}]
-        (cache_dir / "working" / "labels.json").write_text(json.dumps(labels_data))
+        write_labels_raw(labels_data, "working", cache_dir)
 
         with pytest.raises(ValueError, match="Cannot resolve"):
             _resolve_label_ids(["nonexistent"], cache_dir)
@@ -112,13 +111,13 @@ class TestLabelPush:
             {"id": "lbl1", "name": "bug", "color": "red"},
             {"id": "lbl2", "name": "feature", "color": "blue"},
         ]
-        (cache_dir / "clean" / "labels.json").write_text(json.dumps(labels_data))
-        (cache_dir / "working" / "labels.json").write_text(json.dumps(labels_data))
+        write_labels_raw(labels_data, "clean", cache_dir)
+        write_labels_raw(labels_data, "working", cache_dir)
 
         # Clean has one label, working has two
-        write_card_file(sample_card, cache_dir / "clean" / "cards")
+        write_card(sample_card, "clean", cache_dir)
         sample_card.labels = ["bug", "feature"]
-        write_card_file(sample_card, cache_dir / "working" / "cards")
+        write_card(sample_card, "working", cache_dir)
 
         client = MagicMock()
         client.update_card.return_value = sample_card

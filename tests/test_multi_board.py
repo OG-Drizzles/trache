@@ -39,6 +39,9 @@ def _create_board(trache_root: Path, alias: str, board_id: str = "board123", boa
 
 def _setup_multi_board(tmp_path: Path, monkeypatch) -> Path:
     """Set up a multi-board .trache/ with two boards."""
+    monkeypatch.setenv("TRACHE_HUMAN", "1")
+    from trache.cli._output import reset_output
+    reset_output()
     monkeypatch.chdir(tmp_path)
     trache_root = tmp_path / ".trache"
     trache_root.mkdir()
@@ -162,6 +165,9 @@ class TestBoardList:
         assert "*" in result.output
 
     def test_list_no_boards(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setenv("TRACHE_HUMAN", "1")
+        from trache.cli._output import reset_output
+        reset_output()
         monkeypatch.chdir(tmp_path)
         set_board_override(None)
         trache_root = tmp_path / ".trache"

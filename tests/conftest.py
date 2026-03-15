@@ -102,3 +102,12 @@ def _reset_board_override():
         _context._board_local.override = None
     else:
         _context._active_board_override = None
+
+
+@pytest.fixture(autouse=True)
+def _reset_output():
+    """Reset the output singleton after each test."""
+    yield
+    from trache.cli._output import reset_output
+
+    reset_output()

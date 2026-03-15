@@ -1,276 +1,146 @@
-"""Build and maintain JSON lookup indexes for fast discovery."""
+"""Index operations — delegates to SQLite database.
+
+All functions preserve their original signatures (accepting index_dir: Path)
+for backward compatibility with callers. Internally they compute cache_dir
+from index_dir (parent) and route to db.py.
+"""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from trache.cache.models import Card, TrelloList
 
-INDEX_FILENAME = "index.json"
+INDEX_FILENAME = "index.json"  # kept for migration detection
+
+
+def _cache_dir_from_index_dir(index_dir: Path) -> Path:
+    """Compute cache_dir from the old-style index_dir path.
+
+    Callers pass `cache_dir / "indexes"` — we strip the last component.
+    If index_dir doesn't end with "indexes", assume it IS the cache_dir.
+    """
+    if index_dir.name == "indexes":
+        return index_dir.parent
+    return index_dir
 
 
 def build_index(
     cards: list[Card], lists: list[TrelloList], index_dir: Path
 ) -> None:
-    """Build the unified discovery index."""
-    index_dir.mkdir(parents=True, exist_ok=True)
+    """Build the unified discovery index (writes cards to working + lists)."""
+    from trache.cache.db import write_cards_batch, write_lists
 
-    index = {
-        "cards_by_id": {},
-        "cards_by_uid6": {},
-        "cards_by_list": {},
-        "lists_by_id": {},
-    }
-
-    for card in cards:
-        index["cards_by_id"][card.id] = {
-            "title": card.title,
-            "list_id": card.list_id,
-            "uid6": card.uid6,
-            "modified_at": (
-                card.content_modified_at.isoformat() if card.content_modified_at else None
-            ),
-        }
-        index["cards_by_uid6"][card.uid6] = card.id
-        index["cards_by_list"].setdefault(card.list_id, []).append(card.id)
-
-    for lst in lists:
-        index["lists_by_id"][lst.id] = {"name": lst.name, "pos": lst.pos}
-
-    _write_json(index_dir / INDEX_FILENAME, index)
+    cache_dir = _cache_dir_from_index_dir(index_dir)
+    write_cards_batch(cards, "working", cache_dir)
+    write_lists(lists, cache_dir)
 
 
-# Keep old entry points as aliases for backward compatibility during transition
 def build_card_indexes(cards: list[Card], index_dir: Path) -> None:
-    """Rebuild card sections of the unified index, preserving lists_by_id."""
-    index_dir.mkdir(parents=True, exist_ok=True)
-    index = _load_full_index(index_dir)
+    """Rebuild card sections of the index, preserving lists."""
+    from trache.cache.db import write_cards_batch
 
-    # Rebuild card sections
-    index["cards_by_id"] = {}
-    index["cards_by_uid6"] = {}
-    index["cards_by_list"] = {}
-
-    for card in cards:
-        index["cards_by_id"][card.id] = {
-            "title": card.title,
-            "list_id": card.list_id,
-            "uid6": card.uid6,
-            "modified_at": (
-                card.content_modified_at.isoformat() if card.content_modified_at else None
-            ),
-        }
-        index["cards_by_uid6"][card.uid6] = card.id
-        index["cards_by_list"].setdefault(card.list_id, []).append(card.id)
-
-    _write_json(index_dir / INDEX_FILENAME, index)
+    cache_dir = _cache_dir_from_index_dir(index_dir)
+    write_cards_batch(cards, "working", cache_dir)
 
 
 def build_list_index(lists: list[TrelloList], index_dir: Path) -> None:
-    """Build list index. Updates lists section of unified index."""
-    index_dir.mkdir(parents=True, exist_ok=True)
-    index = _load_full_index(index_dir)
-    index["lists_by_id"] = {
-        lst.id: {"name": lst.name, "pos": lst.pos}
-        for lst in lists
-    }
-    _write_json(index_dir / INDEX_FILENAME, index)
+    """Build list index."""
+    from trache.cache.db import write_lists
 
-
-def _load_full_index(index_dir: Path) -> dict:
-    """Load the full unified index, or initialize empty."""
-    path = index_dir / INDEX_FILENAME
-    if path.exists():
-        return json.loads(path.read_text())
-
-    return {
-        "cards_by_id": {},
-        "cards_by_uid6": {},
-        "cards_by_list": {},
-        "lists_by_id": {},
-    }
+    cache_dir = _cache_dir_from_index_dir(index_dir)
+    write_lists(lists, cache_dir)
 
 
 def load_index(index_dir: Path, name: str) -> dict:
     """Load a specific section of the index by name."""
-    index = _load_full_index(index_dir)
-    return index.get(name, {})
+    from trache.cache.db import load_cards_index, load_uid6_index, read_lists
+
+    cache_dir = _cache_dir_from_index_dir(index_dir)
+
+    if name == "cards_by_id":
+        return load_cards_index(cache_dir)
+    elif name == "cards_by_uid6":
+        return load_uid6_index(cache_dir)
+    elif name == "lists_by_id":
+        return read_lists(cache_dir)
+    elif name == "cards_by_list":
+        # Build cards_by_list from cards index
+        cards_index = load_cards_index(cache_dir)
+        by_list: dict[str, list[str]] = {}
+        for card_id, info in cards_index.items():
+            by_list.setdefault(info["list_id"], []).append(card_id)
+        return by_list
+    return {}
 
 
 def add_card_to_index(card: Card, index_dir: Path) -> None:
     """Add or update a single card in the index."""
-    index = _load_full_index(index_dir)
+    from trache.cache.db import write_card
 
-    # Remove card from old list if it moved
-    existing = index["cards_by_id"].get(card.id)
-    if existing and existing.get("list_id") != card.list_id:
-        old_list = index["cards_by_list"].get(existing["list_id"], [])
-        if card.id in old_list:
-            old_list.remove(card.id)
-
-    index["cards_by_id"][card.id] = {
-        "title": card.title,
-        "list_id": card.list_id,
-        "uid6": card.uid6,
-        "modified_at": card.content_modified_at.isoformat() if card.content_modified_at else None,
-    }
-    index["cards_by_uid6"][card.uid6] = card.id
-    index["cards_by_list"].setdefault(card.list_id, [])
-    if card.id not in index["cards_by_list"][card.list_id]:
-        index["cards_by_list"][card.list_id].append(card.id)
-    _write_json(index_dir / INDEX_FILENAME, index)
+    cache_dir = _cache_dir_from_index_dir(index_dir)
+    write_card(card, "working", cache_dir)
 
 
 def update_cards_in_index(cards: list[Card], index_dir: Path) -> None:
-    """Add or update multiple cards in the index with a single read/write cycle."""
-    index = _load_full_index(index_dir)
+    """Add or update multiple cards in the index."""
+    from trache.cache.db import write_cards_batch
 
-    for card in cards:
-        # Remove card from old list if it moved
-        existing = index["cards_by_id"].get(card.id)
-        if existing and existing.get("list_id") != card.list_id:
-            old_list = index["cards_by_list"].get(existing["list_id"], [])
-            if card.id in old_list:
-                old_list.remove(card.id)
-
-        index["cards_by_id"][card.id] = {
-            "title": card.title,
-            "list_id": card.list_id,
-            "uid6": card.uid6,
-            "modified_at": (
-                card.content_modified_at.isoformat() if card.content_modified_at else None
-            ),
-        }
-        index["cards_by_uid6"][card.uid6] = card.id
-        index["cards_by_list"].setdefault(card.list_id, [])
-        if card.id not in index["cards_by_list"][card.list_id]:
-            index["cards_by_list"][card.list_id].append(card.id)
-
-    _write_json(index_dir / INDEX_FILENAME, index)
+    cache_dir = _cache_dir_from_index_dir(index_dir)
+    write_cards_batch(cards, "working", cache_dir)
 
 
 def remove_card_from_index(card_id: str, index_dir: Path) -> None:
     """Remove a card from the index."""
-    index = _load_full_index(index_dir)
-    entry = index["cards_by_id"].pop(card_id, None)
-    if entry:
-        index["cards_by_uid6"].pop(entry.get("uid6", ""), None)
-        for lst in index["cards_by_list"].values():
-            if card_id in lst:
-                lst.remove(card_id)
-    _write_json(index_dir / INDEX_FILENAME, index)
+    from trache.cache.db import delete_card
+
+    cache_dir = _cache_dir_from_index_dir(index_dir)
+    delete_card(card_id, "working", cache_dir)
 
 
 def add_list_to_index(list_id: str, name: str, pos: float, index_dir: Path) -> None:
     """Add a new list to the index."""
-    index = _load_full_index(index_dir)
-    index["lists_by_id"][list_id] = {"name": name, "pos": pos}
-    _write_json(index_dir / INDEX_FILENAME, index)
+    from trache.cache.db import add_list
+
+    cache_dir = _cache_dir_from_index_dir(index_dir)
+    add_list(list_id, name, pos, cache_dir)
 
 
 def update_list_in_index(list_id: str, name: str, pos: float, index_dir: Path) -> None:
     """Update an existing list in the index."""
-    index = _load_full_index(index_dir)
-    existing = index["lists_by_id"].get(list_id, {})
-    index["lists_by_id"][list_id] = {"name": name, "pos": existing.get("pos", pos)}
-    _write_json(index_dir / INDEX_FILENAME, index)
+    from trache.cache.db import update_list
+
+    cache_dir = _cache_dir_from_index_dir(index_dir)
+    update_list(list_id, name, pos, cache_dir)
 
 
 def remove_list_from_index(list_id: str, index_dir: Path) -> None:
     """Remove a list from the index."""
-    index = _load_full_index(index_dir)
-    index["lists_by_id"].pop(list_id, None)
-    # Also remove from cards_by_list
-    index["cards_by_list"].pop(list_id, None)
-    _write_json(index_dir / INDEX_FILENAME, index)
+    from trache.cache.db import remove_list
+
+    cache_dir = _cache_dir_from_index_dir(index_dir)
+    remove_list(list_id, cache_dir)
 
 
 def resolve_card_id(identifier: str, index_dir: Path) -> str:
-    """Resolve a card ID or UID6 to a full card ID.
+    """Resolve a card ID or UID6 to a full card ID."""
+    from trache.cache.db import resolve_card_id as db_resolve
 
-    Raises KeyError with a specific message depending on failure reason:
-    - No board initialised (no index file)
-    - Invalid UID6 format
-    - Card not found on this board
-    """
-    # Check board is initialised
-    index_path = index_dir / INDEX_FILENAME
-    has_index = index_path.exists()
-    if not has_index and not index_dir.exists():
-        raise KeyError(
-            f"No board initialised. Run 'trache init' and 'trache pull' first."
-        )
-
-    # If it looks like a full ID (24 hex chars), return as-is
-    if len(identifier) == 24:
-        return identifier
-
-    # Validate UID6 format: 1-6 hex characters (or temp IDs containing '_' or '~')
-    is_temp_id = "_" in identifier or "~" in identifier
-    if not is_temp_id:
-        upper_id = identifier.upper()
-        if not (1 <= len(identifier) <= 6 and all(c in "0123456789ABCDEF" for c in upper_id)):
-            raise KeyError(
-                f"Invalid card identifier format: '{identifier}'. "
-                f"Expected a 6-character hex UID6 (e.g. 'A1B2C3'), "
-                f"a 24-character full card ID, or a temp ID."
-            )
-    else:
-        upper_id = identifier.upper()
-
-    # Try UID6 lookup
-    uid6_index = load_index(index_dir, "cards_by_uid6")
-    if upper_id in uid6_index:
-        return uid6_index[upper_id]
-
-    # Also try temp card IDs (e.g., "new_abc123...")
-    cards_by_id = load_index(index_dir, "cards_by_id")
-    if identifier in cards_by_id:
-        return identifier
-
-    raise KeyError(
-        f"Card '{identifier}' not found on this board. "
-        f"Run 'trache card list' to see available cards, "
-        f"or 'trache pull' to refresh from Trello."
-    )
+    cache_dir = _cache_dir_from_index_dir(index_dir)
+    return db_resolve(identifier, cache_dir)
 
 
 def resolve_list_id(identifier: str, index_dir: Path) -> str:
     """Resolve a list ID or name to a full list ID."""
-    # If it looks like a full ID (24 hex chars), return as-is
-    if len(identifier) == 24:
-        return identifier
+    from trache.cache.db import resolve_list_id as db_resolve
 
-    # Try name lookup — collect all matches to detect ambiguity
-    lists_index = load_index(index_dir, "lists_by_id")
-    matches: list[tuple[str, str]] = []  # (list_id, name)
-    for list_id, info in lists_index.items():
-        if info["name"].lower() == identifier.lower():
-            matches.append((list_id, info["name"]))
-
-    if len(matches) == 1:
-        return matches[0][0]
-    if len(matches) > 1:
-        ids = ", ".join(f"{name} ({lid})" for lid, name in matches)
-        raise KeyError(
-            f"Ambiguous list name '{identifier}': matches {len(matches)} lists: {ids}. "
-            f"Use the full list ID instead."
-        )
-
-    raise KeyError(f"Cannot resolve list identifier: {identifier}")
+    cache_dir = _cache_dir_from_index_dir(index_dir)
+    return db_resolve(identifier, cache_dir)
 
 
 def resolve_list_name(list_id: str, index_dir: Path) -> str:
-    """Resolve a list ID to its human-readable name. Falls back to raw ID."""
-    lists_index = load_index(index_dir, "lists_by_id")
-    info = lists_index.get(list_id)
-    if info:
-        return info["name"]
-    return list_id
+    """Resolve a list ID to its human-readable name."""
+    from trache.cache.db import resolve_list_name as db_resolve
 
-
-def _write_json(path: Path, data: dict) -> None:
-    from trache.cache._atomic import atomic_write
-
-    atomic_write(path, json.dumps(data, indent=2, default=str) + "\n")
+    cache_dir = _cache_dir_from_index_dir(index_dir)
+    return db_resolve(identifier=list_id, cache_dir=cache_dir)

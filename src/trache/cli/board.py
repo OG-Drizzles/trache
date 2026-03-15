@@ -6,7 +6,6 @@ import shutil
 from pathlib import Path
 
 import typer
-from rich.console import Console
 from rich.table import Table
 
 from trache.cli._context import (
@@ -15,9 +14,9 @@ from trache.cli._context import (
     list_board_names,
     set_active_board,
 )
+from trache.cli._output import get_output
 
 board_app = typer.Typer(no_args_is_help=True)
-console = Console()
 
 
 @board_app.command("list")
@@ -25,9 +24,10 @@ def list_boards() -> None:
     """List all configured boards."""
     from trache.config import SyncState, TracheConfig
 
+    out = get_output()
     boards = list_board_names()
     if not boards:
-        console.print("[dim]No boards configured. Run 'trache init' first.[/dim]")
+        out.human("[dim]No boards configured. Run 'trache init' first.[/dim]")
         return
 
     try:
@@ -35,36 +35,59 @@ def list_boards() -> None:
     except FileNotFoundError:
         active = None
 
-    table = Table(show_header=True, header_style="bold")
-    table.add_column("", width=2)
-    table.add_column("Alias", style="cyan")
-    table.add_column("Trello Board")
-    table.add_column("Last Pull")
+    if out.is_human:
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("", width=2)
+        table.add_column("Alias", style="cyan")
+        table.add_column("Trello Board")
+        table.add_column("Last Pull")
 
-    for alias in boards:
-        board_dir = TRACHE_ROOT / "boards" / alias
-        marker = "*" if alias == active else ""
+        for alias in boards:
+            board_dir = TRACHE_ROOT / "boards" / alias
+            marker = "*" if alias == active else ""
 
-        # Load board name from config
-        trello_name = ""
-        try:
-            config = TracheConfig.load(board_dir)
-            trello_name = config.board_name or config.board_id[:12]
-        except Exception:
-            trello_name = "(config error)"
+            trello_name = ""
+            try:
+                config = TracheConfig.load(board_dir)
+                trello_name = config.board_name or config.board_id[:12]
+            except Exception:
+                trello_name = "(config error)"
 
-        # Load last pull from state
-        last_pull = ""
-        try:
-            state = SyncState.load(board_dir)
-            if state.last_pull:
-                last_pull = state.last_pull[:16].replace("T", " ")
-        except Exception:
-            pass
+            last_pull = ""
+            try:
+                state = SyncState.load(board_dir)
+                if state.last_pull:
+                    last_pull = state.last_pull[:16].replace("T", " ")
+            except Exception:
+                pass
 
-        table.add_row(marker, alias, trello_name, last_pull)
+            table.add_row(marker, alias, trello_name, last_pull)
 
-    console.print(table)
+        out.human_table(table)
+    else:
+        rows = []
+        for alias in boards:
+            board_dir = TRACHE_ROOT / "boards" / alias
+            is_active = alias == active
+
+            trello_name = ""
+            try:
+                config = TracheConfig.load(board_dir)
+                trello_name = config.board_name or config.board_id[:12]
+            except Exception:
+                trello_name = "(config error)"
+
+            last_pull = ""
+            try:
+                state = SyncState.load(board_dir)
+                if state.last_pull:
+                    last_pull = state.last_pull[:16].replace("T", " ")
+            except Exception:
+                pass
+
+            rows.append([alias, trello_name, last_pull, str(is_active).lower()])
+
+        out.tsv(rows, header=["alias", "board_name", "last_pull", "active"])
 
 
 @board_app.command("switch")
@@ -72,15 +95,19 @@ def switch(
     alias: str = typer.Argument(help="Board alias to switch to"),
 ) -> None:
     """Switch the active board."""
+    out = get_output()
     boards = list_board_names()
     if alias not in boards:
-        console.print(f"[red]Board '{alias}' not found.[/red]")
+        out.error(f"Board '{alias}' not found.")
         if boards:
-            console.print(f"Available boards: {', '.join(boards)}")
+            out.human(f"Available boards: {', '.join(boards)}")
         raise typer.Exit(1)
 
     set_active_board(alias)
-    console.print(f"[green]Switched to board: {alias}[/green]")
+    if out.is_human:
+        out.human(f"[green]Switched to board: {alias}[/green]")
+    else:
+        out.json({"ok": True, "alias": alias})
 
 
 @board_app.command("offboard")
@@ -95,15 +122,15 @@ def offboard(
     ),
 ) -> None:
     """Remove a board's local cache. Requires --yes flag."""
+    out = get_output()
+
     if not yes:
-        console.print(
-            "[red]Offboarding a board removes all local data. Pass --yes to confirm.[/red]"
-        )
+        out.error("Offboarding a board removes all local data. Pass --yes to confirm.")
         raise typer.Exit(1)
 
     boards = list_board_names()
     if alias not in boards:
-        console.print(f"[red]Board '{alias}' not found.[/red]")
+        out.error(f"Board '{alias}' not found.")
         raise typer.Exit(1)
 
     board_dir = TRACHE_ROOT / "boards" / alias
@@ -115,9 +142,9 @@ def offboard(
         try:
             changeset = compute_diff(board_dir)
             if not changeset.is_empty:
-                console.print(
-                    f"[red]Board '{alias}' has unpushed changes. "
-                    f"Use --force to destroy anyway.[/red]"
+                out.error(
+                    f"Board '{alias}' has unpushed changes. "
+                    f"Use --force to destroy anyway."
                 )
                 raise typer.Exit(1)
         except (SystemExit, typer.Exit):
@@ -133,16 +160,16 @@ def offboard(
             client, config = get_client_and_config(board_dir)
             with client:
                 client.close_board(config.board_id)
-            console.print(f"[green]Archived board on Trello[/green]")
+            out.human("[green]Archived board on Trello[/green]")
         except Exception as e:
-            console.print(f"[red]Failed to archive on Trello: {e}[/red]")
+            out.error(f"Failed to archive on Trello: {e}")
             raise typer.Exit(1)
 
     # Validate path is under .trache/boards/ before removing
     resolved = board_dir.resolve()
     boards_root = (TRACHE_ROOT / "boards").resolve()
     if not resolved.is_relative_to(boards_root):
-        console.print("[red]Safety check failed: path is not under .trache/boards/[/red]")
+        out.error("Safety check failed: path is not under .trache/boards/")
         raise typer.Exit(1)
 
     shutil.rmtree(board_dir)
@@ -157,10 +184,13 @@ def offboard(
         remaining = list_board_names()
         if remaining:
             set_active_board(remaining[0])
-            console.print(f"Switched active board to: {remaining[0]}")
+            out.human(f"Switched active board to: {remaining[0]}")
         else:
             active_file = TRACHE_ROOT / "active"
             if active_file.exists():
                 active_file.unlink()
 
-    console.print(f"[green]Offboarded board: {alias}[/green]")
+    if out.is_human:
+        out.human(f"[green]Offboarded board: {alias}[/green]")
+    else:
+        out.json({"ok": True, "alias": alias})

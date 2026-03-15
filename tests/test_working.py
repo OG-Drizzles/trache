@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from trache.cache.diff import compute_diff
 from trache.cache.index import build_index, resolve_card_id
 from trache.cache.models import Card, TrelloList
-from trache.cache.store import read_card_file, write_card_file
+from trache.cache.db import read_card, write_card
 from trache.cache.working import (
     archive_card,
     create_card,
@@ -21,8 +23,8 @@ class TestEditTitle:
     def test_edit_title_updates_content_modified_at(
         self, sample_card: Card, sample_lists: list[TrelloList], cache_dir: Path
     ) -> None:
-        write_card_file(sample_card, cache_dir / "clean" / "cards")
-        write_card_file(sample_card, cache_dir / "working" / "cards")
+        write_card(sample_card, "clean", cache_dir)
+        write_card(sample_card, "working", cache_dir)
         build_index([sample_card], sample_lists, cache_dir / "indexes")
 
         old_modified = sample_card.content_modified_at
@@ -43,15 +45,15 @@ class TestEditDescription:
     def test_edit_desc_persists(
         self, sample_card: Card, sample_lists: list[TrelloList], cache_dir: Path
     ) -> None:
-        write_card_file(sample_card, cache_dir / "clean" / "cards")
-        write_card_file(sample_card, cache_dir / "working" / "cards")
+        write_card(sample_card, "clean", cache_dir)
+        write_card(sample_card, "working", cache_dir)
         build_index([sample_card], sample_lists, cache_dir / "indexes")
 
         card = edit_description(sample_card.uid6, "Updated description", cache_dir)
         assert card.description == "Updated description"
 
-        # Re-read from disk to verify persistence
-        reloaded = read_card_file(cache_dir / "working" / "cards" / f"{sample_card.id}.md")
+        # Re-read from db to verify persistence
+        reloaded = read_card(sample_card.id, "working", cache_dir)
         assert reloaded.description == "Updated description"
 
 
@@ -59,8 +61,8 @@ class TestMoveCard:
     def test_move_card_changes_list_id(
         self, sample_card: Card, sample_lists: list[TrelloList], cache_dir: Path
     ) -> None:
-        write_card_file(sample_card, cache_dir / "clean" / "cards")
-        write_card_file(sample_card, cache_dir / "working" / "cards")
+        write_card(sample_card, "clean", cache_dir)
+        write_card(sample_card, "working", cache_dir)
         build_index([sample_card], sample_lists, cache_dir / "indexes")
 
         new_list = sample_lists[1]  # "In Progress"
@@ -81,13 +83,13 @@ class TestCreateCard:
         assert card.title == "New Card"
         assert card.dirty is True
 
-        # File exists in working
-        working_file = cache_dir / "working" / "cards" / f"{card.id}.md"
-        assert working_file.exists()
+        # Card exists in working
+        working_card = read_card(card.id, "working", cache_dir)
+        assert working_card.title == "New Card"
 
-        # File does NOT exist in clean
-        clean_file = cache_dir / "clean" / "cards" / f"{card.id}.md"
-        assert not clean_file.exists()
+        # Card does NOT exist in clean
+        with pytest.raises(FileNotFoundError):
+            read_card(card.id, "clean", cache_dir)
 
     def test_create_card_then_resolve(
         self, sample_lists: list[TrelloList], cache_dir: Path
@@ -110,8 +112,8 @@ class TestArchiveCard:
     def test_archive_sets_closed(
         self, sample_card: Card, sample_lists: list[TrelloList], cache_dir: Path
     ) -> None:
-        write_card_file(sample_card, cache_dir / "clean" / "cards")
-        write_card_file(sample_card, cache_dir / "working" / "cards")
+        write_card(sample_card, "clean", cache_dir)
+        write_card(sample_card, "working", cache_dir)
         build_index([sample_card], sample_lists, cache_dir / "indexes")
 
         card = archive_card(sample_card.uid6, cache_dir)

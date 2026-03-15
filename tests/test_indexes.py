@@ -25,11 +25,11 @@ class TestUnifiedIndex:
         index_dir = cache_dir / "indexes"
         build_index([sample_card], sample_lists, index_dir)
 
-        assert (index_dir / "index.json").exists()
-        # Old files should not exist
-        assert not (index_dir / "cards_by_id.json").exists()
-        assert not (index_dir / "cards_by_uid6.json").exists()
-        assert not (index_dir / "lists_by_id.json").exists()
+        # Data should be retrievable via load_index
+        by_id = load_index(index_dir, "cards_by_id")
+        assert sample_card.id in by_id
+        lists = load_index(index_dir, "lists_by_id")
+        assert len(lists) == 3
 
     def test_load_index_sections(
         self, sample_card: Card, sample_lists: list[TrelloList], cache_dir: Path

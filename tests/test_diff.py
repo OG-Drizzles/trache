@@ -4,25 +4,25 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from trache.cache import db
 from trache.cache.diff import compute_diff, format_diff
 from trache.cache.models import Card
-from trache.cache.store import write_card_file
 
 
 class TestComputeDiff:
     def test_no_changes(self, sample_card: Card, cache_dir: Path) -> None:
-        write_card_file(sample_card, cache_dir / "clean" / "cards")
-        write_card_file(sample_card, cache_dir / "working" / "cards")
+        db.write_card(sample_card, "clean", cache_dir)
+        db.write_card(sample_card, "working", cache_dir)
 
         changeset = compute_diff(cache_dir)
         assert changeset.is_empty
         assert changeset.total_changes == 0
 
     def test_title_change(self, sample_card: Card, cache_dir: Path) -> None:
-        write_card_file(sample_card, cache_dir / "clean" / "cards")
+        db.write_card(sample_card, "clean", cache_dir)
 
         sample_card.title = "Modified Title"
-        write_card_file(sample_card, cache_dir / "working" / "cards")
+        db.write_card(sample_card, "working", cache_dir)
 
         changeset = compute_diff(cache_dir)
         assert len(changeset.modified) == 1
@@ -30,7 +30,7 @@ class TestComputeDiff:
 
     def test_added_card(self, sample_card: Card, cache_dir: Path) -> None:
         # Only in working, not in clean
-        write_card_file(sample_card, cache_dir / "working" / "cards")
+        db.write_card(sample_card, "working", cache_dir)
 
         changeset = compute_diff(cache_dir)
         assert len(changeset.added) == 1
@@ -38,27 +38,27 @@ class TestComputeDiff:
 
     def test_deleted_card(self, sample_card: Card, cache_dir: Path) -> None:
         # Only in clean, not in working
-        write_card_file(sample_card, cache_dir / "clean" / "cards")
+        db.write_card(sample_card, "clean", cache_dir)
 
         changeset = compute_diff(cache_dir)
         assert len(changeset.deleted) == 1
         assert changeset.deleted[0].card_id == sample_card.id
 
     def test_description_change(self, sample_card: Card, cache_dir: Path) -> None:
-        write_card_file(sample_card, cache_dir / "clean" / "cards")
+        db.write_card(sample_card, "clean", cache_dir)
 
         sample_card.description = "Updated description"
-        write_card_file(sample_card, cache_dir / "working" / "cards")
+        db.write_card(sample_card, "working", cache_dir)
 
         changeset = compute_diff(cache_dir)
         assert len(changeset.modified) == 1
         assert "description" in changeset.modified[0].field_changes
 
     def test_list_move(self, sample_card: Card, cache_dir: Path) -> None:
-        write_card_file(sample_card, cache_dir / "clean" / "cards")
+        db.write_card(sample_card, "clean", cache_dir)
 
         sample_card.list_id = "different_list_id_here_000"
-        write_card_file(sample_card, cache_dir / "working" / "cards")
+        db.write_card(sample_card, "working", cache_dir)
 
         changeset = compute_diff(cache_dir)
         assert len(changeset.modified) == 1
@@ -72,7 +72,7 @@ class TestFormatDiff:
         assert format_diff(Changeset()) == "No changes."
 
     def test_formatted_output(self, sample_card: Card, cache_dir: Path) -> None:
-        write_card_file(sample_card, cache_dir / "working" / "cards")
+        db.write_card(sample_card, "working", cache_dir)
 
         changeset = compute_diff(cache_dir)
         output = format_diff(changeset)

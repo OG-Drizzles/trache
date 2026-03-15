@@ -2,18 +2,33 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-from trache.cache.models import Card, TrelloList
-from trache.cache.store import write_card_file
+from trache.cache.db import read_card, write_card
+from trache.cache.models import Board, Card, Label, TrelloList
 from trache.config import TracheConfig
 from trache.sync.pull import pull_full_board
 from trache.sync.push import push_changes
 
-from conftest import make_mock_client, setup_cache
+from conftest import setup_cache
+
+
+def _make_client(cards, lists=None, activity=None):
+    """Make a mock client with a board that has date_last_activity set."""
+    client = MagicMock()
+    client.get_board.return_value = Board(
+        id="board1", name="Test Board", url="",
+        date_last_activity=activity or datetime(2026, 3, 15, 12, 0, 0, tzinfo=timezone.utc),
+    )
+    client.get_board_lists.return_value = lists or []
+    client.get_board_cards.return_value = cards
+    client.get_board_checklists.return_value = []
+    client.get_board_labels.return_value = [Label(id="lbl1", name="bug", color="red")]
+    return client
 
 
 class TestDirtyPullGuard:
@@ -22,7 +37,8 @@ class TestDirtyPullGuard:
         cache_dir, config = setup_cache(tmp_path)
         card = Card(id="67abc123def4567890fedcba", board_id="board1", list_id="list1", title="Card")
         lists = [TrelloList(id="list1", name="To Do", board_id="board1", pos=1)]
-        client = make_mock_client([card], lists)
+        t1 = datetime(2026, 3, 15, 12, 0, 0, tzinfo=timezone.utc)
+        client = _make_client([card], lists, activity=t1)
 
         # Initial pull
         pull_full_board(config, client, cache_dir, force=True)
@@ -32,18 +48,23 @@ class TestDirtyPullGuard:
             id="67abc123def4567890fedcba", board_id="board1",
             list_id="list1", title="Dirty",
         )
-        write_card_file(working_card, cache_dir / "working" / "cards")
+        write_card(working_card, "working", cache_dir)
 
-        # Pull should be refused
+        # Use a new client with later activity so stale check passes
+        t2 = datetime(2026, 3, 15, 13, 0, 0, tzinfo=timezone.utc)
+        client2 = _make_client([card], lists, activity=t2)
+
+        # Pull should be refused due to dirty state
         with pytest.raises(RuntimeError, match="unpushed changes"):
-            pull_full_board(config, client, cache_dir)
+            pull_full_board(config, client2, cache_dir)
 
     def test_dirty_pull_force_overwrites(self, tmp_path: Path) -> None:
         """F-005: pull with --force should overwrite dirty state."""
         cache_dir, config = setup_cache(tmp_path)
         card = Card(id="67abc123def4567890fedcba", board_id="board1", list_id="list1", title="Card")
         lists = [TrelloList(id="list1", name="To Do", board_id="board1", pos=1)]
-        client = make_mock_client([card], lists)
+        t1 = datetime(2026, 3, 15, 12, 0, 0, tzinfo=timezone.utc)
+        client = _make_client([card], lists, activity=t1)
 
         # Initial pull
         pull_full_board(config, client, cache_dir, force=True)
@@ -53,15 +74,14 @@ class TestDirtyPullGuard:
             id="67abc123def4567890fedcba", board_id="board1",
             list_id="list1", title="Dirty",
         )
-        write_card_file(dirty_card, cache_dir / "working" / "cards")
+        write_card(dirty_card, "working", cache_dir)
 
         # Force pull should succeed
         result = pull_full_board(config, client, cache_dir, force=True)
         assert result.cards == 1
 
         # Working copy should be overwritten to clean state
-        from trache.cache.store import read_card_file
-        restored = read_card_file(cache_dir / "working" / "cards" / "67abc123def4567890fedcba.md")
+        restored = read_card("67abc123def4567890fedcba", "working", cache_dir)
         assert restored.title == "Card"
 
 
@@ -70,14 +90,16 @@ class TestSyncPartialFailure:
         """F-008: sync with push errors should NOT full-pull."""
         cache_dir, config = setup_cache(tmp_path)
 
-        # Create a card in both clean and working with different titles
-        card = Card(
+        card_clean = Card(
             id="67abc123def4567890fedcba", board_id="board1",
             list_id="list1", title="Original",
         )
-        write_card_file(card, cache_dir / "clean" / "cards")
-        card.title = "Modified"
-        write_card_file(card, cache_dir / "working" / "cards")
+        card_working = Card(
+            id="67abc123def4567890fedcba", board_id="board1",
+            list_id="list1", title="Modified",
+        )
+        write_card(card_clean, "clean", cache_dir)
+        write_card(card_working, "working", cache_dir)
 
         # Mock client that fails on update
         client = MagicMock()
@@ -88,27 +110,29 @@ class TestSyncPartialFailure:
         assert len(result.errors) == 1
         assert "API Error" in result.errors[0]
 
-        # Working copy should still have the local changes (not overwritten)
-        from trache.cache.store import read_card_file
-        working = read_card_file(cache_dir / "working" / "cards" / "67abc123def4567890fedcba.md")
+        # Working copy should still have the local changes
+        working = read_card("67abc123def4567890fedcba", "working", cache_dir)
         assert working.title == "Modified"
 
     def test_sync_success_allows_pull(self, tmp_path: Path) -> None:
         """Push OK → full pull should proceed."""
         cache_dir, config = setup_cache(tmp_path)
 
-        card = Card(
+        card_clean = Card(
             id="67abc123def4567890fedcba", board_id="board1",
             list_id="list1", title="Original",
         )
-        write_card_file(card, cache_dir / "clean" / "cards")
-        card.title = "Modified"
-        write_card_file(card, cache_dir / "working" / "cards")
+        card_working = Card(
+            id="67abc123def4567890fedcba", board_id="board1",
+            list_id="list1", title="Modified",
+        )
+        write_card(card_clean, "clean", cache_dir)
+        write_card(card_working, "working", cache_dir)
 
         # Mock client that succeeds
         client = MagicMock()
-        client.update_card.return_value = card
-        client.get_card.return_value = card
+        client.update_card.return_value = card_working
+        client.get_card.return_value = card_working
         client.get_card_checklists.return_value = []
 
         changeset, result = push_changes(config, client, cache_dir)
@@ -125,24 +149,22 @@ class TestSyncHappyPath:
         cache_dir, config = setup_cache(tmp_path)
         lists = [TrelloList(id="list1", name="To Do", board_id="board1", pos=1)]
 
-        # Initial state: card in clean and working with different titles
-        card = Card(
+        card_clean = Card(
             id="67abc123def4567890fedcba", board_id="board1",
             list_id="list1", title="Original",
         )
-        write_card_file(card, cache_dir / "clean" / "cards")
-        modified = Card(
+        card_working = Card(
             id="67abc123def4567890fedcba", board_id="board1",
             list_id="list1", title="Updated via sync",
         )
-        write_card_file(modified, cache_dir / "working" / "cards")
+        write_card(card_clean, "clean", cache_dir)
+        write_card(card_working, "working", cache_dir)
 
-        # Mock client: push succeeds, full pull returns post-push state
         post_push_card = Card(
             id="67abc123def4567890fedcba", board_id="board1",
             list_id="list1", title="Updated via sync",
         )
-        client = make_mock_client([post_push_card], lists)
+        client = _make_client([post_push_card], lists)
         client.update_card.return_value = post_push_card
         client.get_card.return_value = post_push_card
         client.get_card_checklists.return_value = []
@@ -152,18 +174,13 @@ class TestSyncHappyPath:
         assert len(result.pushed) == 1
         assert len(result.errors) == 0
 
-        # Pull phase (force=True since push just ran)
+        # Pull phase
         pull_result = pull_full_board(config, client, cache_dir, force=True)
         assert pull_result.cards == 1
 
         # Final state: clean and working should match
-        from trache.cache.store import read_card_file
-        clean = read_card_file(
-            cache_dir / "clean" / "cards" / "67abc123def4567890fedcba.md"
-        )
-        working = read_card_file(
-            cache_dir / "working" / "cards" / "67abc123def4567890fedcba.md"
-        )
+        clean = read_card("67abc123def4567890fedcba", "clean", cache_dir)
+        working = read_card("67abc123def4567890fedcba", "working", cache_dir)
         assert clean.title == "Updated via sync"
         assert working.title == "Updated via sync"
 

@@ -6,8 +6,10 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, call
 
+import pytest
+
+from trache.cache.db import read_card, write_card, write_checklists_raw
 from trache.cache.models import Card, Checklist, ChecklistItem
-from trache.cache.store import write_card_file
 from trache.config import TracheConfig, ensure_cache_structure
 from trache.sync.push import push_changes
 
@@ -31,9 +33,9 @@ class TestPushChanges:
     def test_push_dry_run(self, tmp_path: Path, sample_card: Card) -> None:
         cache_dir, config = self._setup_cache(tmp_path)
 
-        write_card_file(sample_card, cache_dir / "clean" / "cards")
+        write_card(sample_card, "clean", cache_dir)
         sample_card.title = "Modified"
-        write_card_file(sample_card, cache_dir / "working" / "cards")
+        write_card(sample_card, "working", cache_dir)
 
         client = MagicMock()
         changeset, result = push_changes(config, client, cache_dir, dry_run=True)
@@ -46,9 +48,9 @@ class TestPushChanges:
     def test_push_modified_card(self, tmp_path: Path, sample_card: Card) -> None:
         cache_dir, config = self._setup_cache(tmp_path)
 
-        write_card_file(sample_card, cache_dir / "clean" / "cards")
+        write_card(sample_card, "clean", cache_dir)
         sample_card.title = "Modified Title"
-        write_card_file(sample_card, cache_dir / "working" / "cards")
+        write_card(sample_card, "working", cache_dir)
 
         # Mock client — update_card returns the card, get_card for re-pull
         client = MagicMock()
@@ -66,7 +68,7 @@ class TestPushChanges:
 
         sample_card.id = "new_temp_abc123d4t~"
         sample_card.uid6 = "3D4T~"  # Reset uid6 manually for temp ID
-        write_card_file(sample_card, cache_dir / "working" / "cards")
+        write_card(sample_card, "working", cache_dir)
 
         client = MagicMock()
         new_card = Card(
@@ -100,9 +102,9 @@ class TestPushFailurePreservation:
         """If API update fails, working copy retains local modification."""
         cache_dir, config = self._setup_cache(tmp_path)
 
-        write_card_file(sample_card, cache_dir / "clean" / "cards")
+        write_card(sample_card, "clean", cache_dir)
         sample_card.title = "My Important Local Edit"
-        write_card_file(sample_card, cache_dir / "working" / "cards")
+        write_card(sample_card, "working", cache_dir)
 
         # Mock client that raises on update
         client = MagicMock()
@@ -114,16 +116,11 @@ class TestPushFailurePreservation:
         assert "API timeout" in result.errors[0]
 
         # Working copy must still have the local modification
-        from trache.cache.store import read_card_file
-        working = read_card_file(
-            cache_dir / "working" / "cards" / f"{sample_card.id}.md"
-        )
+        working = read_card(sample_card.id, "working", cache_dir)
         assert working.title == "My Important Local Edit"
 
         # Clean copy should be unchanged (original)
-        clean = read_card_file(
-            cache_dir / "clean" / "cards" / f"{sample_card.id}.md"
-        )
+        clean = read_card(sample_card.id, "clean", cache_dir)
         assert clean.title == "Test Card"
 
     def test_no_destructive_side_effects(
@@ -132,18 +129,20 @@ class TestPushFailurePreservation:
         """Push failure should not delete files or corrupt indexes."""
         cache_dir, config = self._setup_cache(tmp_path)
 
-        write_card_file(sample_card, cache_dir / "clean" / "cards")
+        write_card(sample_card, "clean", cache_dir)
         sample_card.title = "Changed"
-        write_card_file(sample_card, cache_dir / "working" / "cards")
+        write_card(sample_card, "working", cache_dir)
 
         client = MagicMock()
         client.update_card.side_effect = Exception("Network error")
 
         push_changes(config, client, cache_dir)
 
-        # Both files should still exist
-        assert (cache_dir / "clean" / "cards" / f"{sample_card.id}.md").exists()
-        assert (cache_dir / "working" / "cards" / f"{sample_card.id}.md").exists()
+        # Both records should still exist in the database
+        clean = read_card(sample_card.id, "clean", cache_dir)
+        assert clean is not None
+        working = read_card(sample_card.id, "working", cache_dir)
+        assert working is not None
 
 
 class TestStaleStateBehaviour:
@@ -164,9 +163,9 @@ class TestStaleStateBehaviour:
         """Documents: local modification pushed → server accepts → re-pull returns our changes."""
         cache_dir, config = self._setup_cache(tmp_path)
 
-        write_card_file(sample_card, cache_dir / "clean" / "cards")
+        write_card(sample_card, "clean", cache_dir)
         sample_card.title = "Local Wins Title"
-        write_card_file(sample_card, cache_dir / "working" / "cards")
+        write_card(sample_card, "working", cache_dir)
 
         # Server accepts the push and returns the updated card on re-pull
         post_push_card = Card(
@@ -186,10 +185,7 @@ class TestStaleStateBehaviour:
         assert len(result.errors) == 0
 
         # After re-pull, working copy has our title
-        from trache.cache.store import read_card_file
-        working = read_card_file(
-            cache_dir / "working" / "cards" / f"{sample_card.id}.md"
-        )
+        working = read_card(sample_card.id, "working", cache_dir)
         assert working.title == "Local Wins Title"
 
 
@@ -211,11 +207,8 @@ class TestPushNewCardChecklists:
             id=temp_id, title="Card With Checklist",
             list_id="list1", board_id="board1",
         )
-        write_card_file(card, cache_dir / "working" / "cards")
+        write_card(card, "working", cache_dir)
 
-        # Write checklist JSON
-        cl_dir = cache_dir / "working" / "checklists"
-        cl_dir.mkdir(parents=True, exist_ok=True)
         cl_data = [
             {
                 "id": "temp_cl_1", "name": "Tasks", "card_id": temp_id,
@@ -225,7 +218,7 @@ class TestPushNewCardChecklists:
                 ],
             }
         ]
-        (cl_dir / f"{temp_id}.json").write_text(json.dumps(cl_data))
+        write_checklists_raw(temp_id, cl_data, "working", cache_dir)
 
         # Mock client
         real_card = Card(id="real_trello_card_id_here", title="Card With Checklist", list_id="list1")
@@ -252,10 +245,8 @@ class TestPushNewCardChecklists:
 
         temp_id = "new_temp_xyz789e5t~"
         card = Card(id=temp_id, title="Checked", list_id="list1", board_id="board1")
-        write_card_file(card, cache_dir / "working" / "cards")
+        write_card(card, "working", cache_dir)
 
-        cl_dir = cache_dir / "working" / "checklists"
-        cl_dir.mkdir(parents=True, exist_ok=True)
         cl_data = [
             {
                 "id": "temp_cl_2", "name": "Done", "card_id": temp_id,
@@ -264,7 +255,7 @@ class TestPushNewCardChecklists:
                 ],
             }
         ]
-        (cl_dir / f"{temp_id}.json").write_text(json.dumps(cl_data))
+        write_checklists_raw(temp_id, cl_data, "working", cache_dir)
 
         real_card = Card(id="real_checked_card_id_ok", title="Checked", list_id="list1")
         new_cl = Checklist(id="real_cl_2", name="Done", card_id=real_card.id)
@@ -288,7 +279,7 @@ class TestPushNewCardChecklists:
 
         temp_id = "new_temp_noclst99t~"
         card = Card(id=temp_id, title="No CL", list_id="list1", board_id="board1")
-        write_card_file(card, cache_dir / "working" / "cards")
+        write_card(card, "working", cache_dir)
 
         real_card = Card(id="real_nocl_card_id_here", title="No CL", list_id="list1")
 
@@ -317,18 +308,16 @@ class TestPushDeletedCardCleanup:
         cache_dir, config = self._setup_cache(tmp_path)
 
         # Write only to clean (simulates a card whose working copy was deleted → "deleted" diff)
-        write_card_file(sample_card, cache_dir / "clean" / "cards")
+        write_card(sample_card, "clean", cache_dir)
 
-        # Also write a clean checklist file
-        cl_dir = cache_dir / "clean" / "checklists"
-        cl_dir.mkdir(parents=True, exist_ok=True)
-        (cl_dir / f"{sample_card.id}.json").write_text("[]")
+        # Also write an empty clean checklist record
+        write_checklists_raw(sample_card.id, [], "clean", cache_dir)
 
-        # Build index with the card
-        from trache.cache.index import build_index
+        # Write lists to the DB so the index lookup works, without touching working cards
+        from trache.cache.db import write_lists
         from trache.cache.models import TrelloList
         lists = [TrelloList(id=sample_card.list_id, name="To Do", board_id="board1", pos=1)]
-        build_index([sample_card], lists, cache_dir / "indexes")
+        write_lists(lists, cache_dir)
 
         client = MagicMock()
         client.archive_card.return_value = sample_card
@@ -336,9 +325,9 @@ class TestPushDeletedCardCleanup:
         changeset, result = push_changes(config, client, cache_dir)
 
         assert len(result.archived) == 1
-        # Clean files should be removed
-        assert not (cache_dir / "clean" / "cards" / f"{sample_card.id}.md").exists()
-        assert not (cache_dir / "clean" / "checklists" / f"{sample_card.id}.json").exists()
+        # Clean record should be removed from the database
+        with pytest.raises(FileNotFoundError):
+            read_card(sample_card.id, "clean", cache_dir)
         # Index should no longer contain the card
         from trache.cache.index import load_index
         cards_by_id = load_index(cache_dir / "indexes", "cards_by_id")
@@ -347,12 +336,13 @@ class TestPushDeletedCardCleanup:
     def test_push_deleted_card_idempotent(self, tmp_path: Path, sample_card: Card) -> None:
         cache_dir, config = self._setup_cache(tmp_path)
 
-        write_card_file(sample_card, cache_dir / "clean" / "cards")
+        write_card(sample_card, "clean", cache_dir)
 
-        from trache.cache.index import build_index
+        # Write lists to the DB without adding the card to working (preserves "deleted" diff state)
+        from trache.cache.db import write_lists
         from trache.cache.models import TrelloList
         lists = [TrelloList(id=sample_card.list_id, name="To Do", board_id="board1", pos=1)]
-        build_index([sample_card], lists, cache_dir / "indexes")
+        write_lists(lists, cache_dir)
 
         client = MagicMock()
         client.archive_card.return_value = sample_card

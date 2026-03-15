@@ -7,16 +7,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
-from rich.console import Console
-
 from trache.api.client import TrelloClient
+from trache.cache.db import (
+    delete_card,
+    read_card,
+    read_checklists_raw,
+    read_labels_raw,
+    resolve_card_id,
+    write_labels_raw,
+)
 from trache.cache.diff import CardChange, Changeset, ChecklistChange, LabelChange, compute_diff
-from trache.cache.store import read_card_file
 from trache.config import SyncState, TracheConfig
 from trache.identity import generate_block, inject_block
 from trache.sync.pull import pull_card
-
-_console = Console()
 
 
 @dataclass
@@ -54,27 +57,19 @@ def push_changes(
     card_filter: Optional[str] = None,
     on_progress: Optional[Callable[[int, int, str], None]] = None,
 ) -> tuple[Changeset, PushResult]:
-    """Push local changes to Trello.
-
-    Returns (changeset, result). If dry_run, no API calls are made.
-    on_progress(current, total, description) is called before each card push.
-    """
+    """Push local changes to Trello."""
     changeset = compute_diff(cache_dir)
     result = PushResult()
 
-    # Validate card filter up front to give a clear error
+    # Validate card filter up front
     if card_filter:
-        from trache.cache.index import resolve_card_id
-
         try:
-            resolve_card_id(card_filter, cache_dir / "indexes")
+            resolve_card_id(card_filter, cache_dir)
         except KeyError:
             raise KeyError(f"Cannot resolve card identifier: {card_filter}")
 
     if changeset.is_empty:
         return changeset, result
-
-    working_dir = cache_dir / "working" / "cards"
 
     # Count total items for progress reporting
     all_changes: list[tuple[str, CardChange]] = []
@@ -91,9 +86,8 @@ def push_changes(
             continue
         all_changes.append(("deleted", change))
 
-    # Push label creates before card changes (so new labels are available for card assignments)
-    labels_path = cache_dir / "working" / "labels.json"
-    labels_data = json.loads(labels_path.read_text()) if labels_path.exists() else []
+    # Push label creates before card changes
+    labels_data = read_labels_raw("working", cache_dir)
     if not dry_run and not card_filter:
         _push_label_creates(
             changeset.label_changes, client, config, cache_dir, result,
@@ -119,7 +113,7 @@ def push_changes(
             if on_progress:
                 on_progress(idx, total, f"Updating {change.title} [{uid6}]")
             try:
-                _push_modified_card(change, working_dir, client, config, cache_dir)
+                _push_modified_card(change, client, config, cache_dir)
                 result.pushed.append(entry)
             except Exception as e:
                 result.errors.append(f"Failed to push {change.card_id}: {e}")
@@ -139,7 +133,7 @@ def push_changes(
                 on_progress(idx, total, f"Creating {change.title} [{uid6}]")
             try:
                 create_result = _push_new_card(
-                    change, working_dir, client, config, cache_dir
+                    change, client, config, cache_dir
                 )
                 result.created.append(create_result)
             except Exception as e:
@@ -159,21 +153,18 @@ def push_changes(
                 on_progress(idx, total, f"Archiving {change.title} [{uid6}]")
             try:
                 client.archive_card(change.card_id)
-                # Clean up local state so card isn't re-detected as deleted
-                (cache_dir / "clean" / "cards" / f"{change.card_id}.md").unlink(missing_ok=True)
-                (cache_dir / "clean" / "checklists" / f"{change.card_id}.json").unlink(missing_ok=True)
-                (cache_dir / "working" / "checklists" / f"{change.card_id}.json").unlink(missing_ok=True)
-                from trache.cache.index import remove_card_from_index
-                remove_card_from_index(change.card_id, cache_dir / "indexes")
+                # Clean up local state: remove from both clean and working
+                delete_card(change.card_id, "clean", cache_dir)
+                delete_card(change.card_id, "working", cache_dir)
                 result.archived.append(entry)
             except Exception as e:
                 result.errors.append(f"Failed to archive {change.card_id}: {e}")
 
-    # Push label deletes after card changes (cards should have labels removed first)
+    # Push label deletes after card changes
     if not dry_run and not card_filter:
         _push_label_deletes(changeset.label_changes, client, result)
 
-    # Re-pull touched objects (not in dry-run), skip dirty check (force=True)
+    # Re-pull touched objects (not in dry-run)
     if not dry_run:
         for entry in result.pushed:
             try:
@@ -189,18 +180,12 @@ def push_changes(
 
 def _push_modified_card(
     change: CardChange,
-    working_dir: Path,
     client: TrelloClient,
     config: TracheConfig,
     cache_dir: Path,
 ) -> None:
     """Push a modified card to Trello."""
-    # Conflict warning using stored timestamps (no extra API call)
-    state = SyncState.load(cache_dir)
-    stored_ts = state.card_timestamps.get(change.card_id)
-    # Warning is emitted after push completes, using the re-pulled card's timestamp
-
-    card = read_card_file(working_dir / f"{change.card_id}.md")
+    card = read_card(change.card_id, "working", cache_dir)
 
     update_fields: dict = {}
 
@@ -208,7 +193,6 @@ def _push_modified_card(
         update_fields["name"] = card.title
 
     if "description" in change.field_changes:
-        # Inject identifier block into description for Trello
         block = generate_block(
             title=card.title,
             created_at=card.created_at,
@@ -243,10 +227,7 @@ def _push_modified_card(
             )
             new_rendered = inject_block(card.description, block)
 
-            # Compare against clean card's rendered description
-            clean_card = read_card_file(
-                cache_dir / "clean" / "cards" / f"{change.card_id}.md"
-            )
+            clean_card = read_card(change.card_id, "clean", cache_dir)
             clean_block = generate_block(
                 title=clean_card.title,
                 created_at=clean_card.created_at,
@@ -268,15 +249,14 @@ def _push_modified_card(
 
 def _push_new_card(
     change: CardChange,
-    working_dir: Path,
     client: TrelloClient,
     config: TracheConfig,
     cache_dir: Path,
 ) -> PushEntry:
-    """Create a new card on Trello. Returns a PushEntry with reconciliation info."""
-    card = read_card_file(working_dir / f"{change.card_id}.md")
+    """Create a new card on Trello."""
+    card = read_card(change.card_id, "working", cache_dir)
 
-    # Inject identifier block with temp UID (will be corrected below)
+    # Inject identifier block
     block = generate_block(
         title=card.title,
         created_at=card.created_at,
@@ -288,7 +268,7 @@ def _push_new_card(
 
     new_card = client.create_card(card.list_id, card.title, desc_with_block)
 
-    # Fix identifier block with real UID6 now that Trello assigned an ID
+    # Fix identifier block with real UID6
     real_uid6 = new_card.id[-6:].upper()
     corrected_block = generate_block(
         title=card.title,
@@ -300,40 +280,23 @@ def _push_new_card(
     corrected_desc = inject_block(card.description, corrected_block)
     client.update_card(new_card.id, {"desc": corrected_desc})
 
-    # Push checklists for the new card (read from temp checklist JSON)
-    temp_cl_path = cache_dir / "working" / "checklists" / f"{change.card_id}.json"
-    if temp_cl_path.exists():
-        import json as _json
-
-        cl_data_list = _json.loads(temp_cl_path.read_text())
-        for cl_data in cl_data_list:
-            new_cl = client.create_checklist(new_card.id, cl_data["name"])
-            for item in cl_data.get("items", []):
-                new_item = client.add_checklist_item(new_cl.id, item["name"])
-                if item.get("state") == "complete":
-                    client.update_checklist_item(new_card.id, new_item.id, "complete")
+    # Push checklists for the new card
+    cl_data_list = read_checklists_raw(change.card_id, "working", cache_dir)
+    for cl_data in cl_data_list:
+        new_cl = client.create_checklist(new_card.id, cl_data["name"])
+        for item in cl_data.get("items", []):
+            new_item = client.add_checklist_item(new_cl.id, item["name"])
+            if item.get("state") == "complete":
+                client.update_checklist_item(new_card.id, new_item.id, "complete")
 
     # Archive on Trello if the card was archived locally
     was_archived = card.closed
     if was_archived:
         client.archive_card(new_card.id)
 
-    # Clean up temp files
-    temp_file = working_dir / f"{change.card_id}.md"
-    temp_file.unlink(missing_ok=True)
-    clean_file = cache_dir / "clean" / "cards" / f"{change.card_id}.md"
-    clean_file.unlink(missing_ok=True)
-
-    # Clean up temp checklist files
-    temp_cl = cache_dir / "working" / "checklists" / f"{change.card_id}.json"
-    temp_cl.unlink(missing_ok=True)
-    clean_cl = cache_dir / "clean" / "checklists" / f"{change.card_id}.json"
-    clean_cl.unlink(missing_ok=True)
-
-    # Clean up temp card from index
-    from trache.cache.index import remove_card_from_index
-
-    remove_card_from_index(change.card_id, cache_dir / "indexes")
+    # Clean up temp card from db
+    delete_card(change.card_id, "working", cache_dir)
+    delete_card(change.card_id, "clean", cache_dir)
 
     # Re-pull the real card to reconcile
     pull_card(new_card.id, config, client, cache_dir, force=True)
@@ -356,7 +319,6 @@ def _push_checklist_changes(
     cache_dir: Path,
 ) -> None:
     """Push checklist changes to Trello API."""
-    # Build temp→real ID mapping for newly created checklists
     temp_to_real: dict[str, str] = {}
 
     for cl_change in changes:
@@ -366,7 +328,6 @@ def _push_checklist_changes(
         elif cl_change.change_type == "state_change":
             client.update_checklist_item(card_id, cl_change.item_id, cl_change.new_value)
         elif cl_change.change_type == "new_item":
-            # Substitute real checklist ID if this item belongs to a newly created checklist
             cl_id = temp_to_real.get(cl_change.checklist_id, cl_change.checklist_id)
             client.add_checklist_item(cl_id, cl_change.new_value)
         elif cl_change.change_type == "removed_item":
@@ -384,32 +345,25 @@ def _push_label_creates(
     *,
     labels_data: list[dict] | None = None,
 ) -> None:
-    """Push label creates to Trello API. Updates working/labels.json with real IDs."""
-    from trache.cache._atomic import atomic_write
-
+    """Push label creates to Trello API. Updates working labels with real IDs."""
     creates = [lc for lc in label_changes if lc.change_type == "created"]
     if not creates:
         return
 
-    labels_path = cache_dir / "working" / "labels.json"
     if labels_data is None:
-        labels_data = json.loads(labels_path.read_text()) if labels_path.exists() else []
+        labels_data = read_labels_raw("working", cache_dir)
 
     for lc in creates:
         try:
             new_label = client.create_label(config.board_id, lc.label_name, lc.label_color)
-            # Replace temp ID with real ID in working/labels.json
             for lb in labels_data:
                 if lb["id"] == lc.label_id:
                     lb["id"] = new_label.id
                     break
-            _console.print(
-                f"[green]  Label created: {lc.label_name} [{new_label.id[-6:].upper()}][/green]"
-            )
         except Exception as e:
             result.errors.append(f"Failed to create label '{lc.label_name}': {e}")
 
-    atomic_write(labels_path, json.dumps(labels_data, indent=2) + "\n")
+    write_labels_raw(labels_data, "working", cache_dir)
 
 
 def _push_label_deletes(
@@ -422,23 +376,18 @@ def _push_label_deletes(
     for lc in deletes:
         try:
             client.delete_label(lc.label_id)
-            _console.print(f"[yellow]  Label deleted: {lc.label_name}[/yellow]")
         except Exception as e:
             result.errors.append(f"Failed to delete label '{lc.label_name}': {e}")
 
 
 def _resolve_label_ids(label_names: list[str], cache_dir: Path) -> list[str]:
-    """Resolve label names to Trello IDs. Raises on unresolvable labels."""
-
-    labels_path = cache_dir / "working" / "labels.json"
-    if not labels_path.exists():
+    """Resolve label names to Trello IDs."""
+    labels_data = read_labels_raw("working", cache_dir)
+    if not labels_data:
         raise ValueError(
-            "Cannot push labels: labels.json not found in cache. Run 'trache pull' first."
+            "Cannot push labels: no labels in cache. Run 'trache pull' first."
         )
 
-    labels_data = json.loads(labels_path.read_text())
-
-    # Build name→ID mapping
     name_to_id: dict[str, str] = {}
     color_to_ids: dict[str, list[str]] = {}
     for lb in labels_data:
@@ -475,10 +424,8 @@ def _matches_filter(card_id: str, filter_str: str, cache_dir: Path) -> bool:
         return True
     if card_id.upper().endswith(filter_str.upper()):
         return True
-    from trache.cache.index import resolve_card_id
-
     try:
-        resolved = resolve_card_id(filter_str, cache_dir / "indexes")
+        resolved = resolve_card_id(filter_str, cache_dir)
         return resolved == card_id
     except KeyError:
         return False

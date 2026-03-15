@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Optional
 from uuid import uuid4
 
 import typer
-from rich.console import Console
 from rich.table import Table
 
+from trache.cache.db import list_cards, read_labels_raw, write_labels_raw
+from trache.cli._output import get_output
+
 label_app = typer.Typer(no_args_is_help=True)
-console = Console()
 
 
 def _cache_dir() -> Path:
@@ -20,61 +20,42 @@ def _cache_dir() -> Path:
     return resolve_cache_dir()
 
 
-def _load_labels(cache_dir: Path) -> list[dict]:
-    path = cache_dir / "working" / "labels.json"
-    if not path.exists():
-        return []
-    return json.loads(path.read_text())
-
-
-def _save_labels(labels: list[dict], cache_dir: Path) -> None:
-    from trache.cache._atomic import atomic_write
-
-    path = cache_dir / "working" / "labels.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write(path, json.dumps(labels, indent=2) + "\n")
-
-
 @label_app.command("list")
-def list_labels(
-    raw: bool = typer.Option(False, "--raw", help="Tab-separated output"),
-) -> None:
+def list_labels() -> None:
     """List board labels (reads local cache, no API call)."""
+    out = get_output()
     cache_dir = _cache_dir()
-    labels_path = cache_dir / "working" / "labels.json"
-
-    if not labels_path.exists():
-        console.print("[dim]No labels found. Run `trache pull` first.[/dim]")
-        raise typer.Exit(1)
-
-    labels = json.loads(labels_path.read_text())
+    labels = read_labels_raw("working", cache_dir)
 
     if not labels:
-        if not raw:
-            console.print("[dim]No labels on this board.[/dim]")
+        if out.is_human:
+            out.human("[dim]No labels found. Run `trache pull` first.[/dim]")
+        else:
+            out.tsv([], header=["name", "color"])
         return
 
-    if raw:
+    if out.is_human:
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("Name")
+        table.add_column("Color")
+
         for lbl in labels:
             name = lbl.get("name", "")
             color = lbl.get("color", "")
             if name:
-                print(f"{name}\t{color}")
-        return
+                table.add_row(name, color)
+            else:
+                table.add_row("[dim](unnamed)[/dim]", color)
 
-    table = Table(show_header=True, header_style="bold")
-    table.add_column("Name")
-    table.add_column("Color")
-
-    for lbl in labels:
-        name = lbl.get("name", "")
-        color = lbl.get("color", "")
-        if name:
-            table.add_row(name, color)
-        else:
-            table.add_row(f"[dim](unnamed)[/dim]", color)
-
-    console.print(table)
+        out.human_table(table)
+    else:
+        rows = []
+        for lbl in labels:
+            name = lbl.get("name", "")
+            color = lbl.get("color", "")
+            if name:
+                rows.append([name, color])
+        out.tsv(rows, header=["name", "color"])
 
 
 @label_app.command("create")
@@ -83,25 +64,29 @@ def create(
     color: Optional[str] = typer.Option(None, "--color", "-c", help="Label color"),
 ) -> None:
     """Create a new board label (local-first, push to sync)."""
+    out = get_output()
     cache_dir = _cache_dir()
-    labels = _load_labels(cache_dir)
+    labels = read_labels_raw("working", cache_dir)
 
     # Check for duplicate name
     for lbl in labels:
         if lbl.get("name") == name:
-            console.print(f"[red]Label '{name}' already exists[/red]")
+            out.error(f"Label '{name}' already exists")
             raise typer.Exit(1)
 
     temp_id = f"temp_{uuid4().hex[:14]}t~"
     entry: dict = {"id": temp_id, "name": name, "color": color}
     labels.append(entry)
-    _save_labels(labels, cache_dir)
+    write_labels_raw(labels, "working", cache_dir)
 
-    color_info = color or "no color"
-    console.print(
-        f"[green]Label created: {name} ({color_info}) ({temp_id}) "
-        f"(local — push to sync)[/green]"
-    )
+    if out.is_human:
+        color_info = color or "no color"
+        out.human(
+            f"[green]Label created: {name} ({color_info}) ({temp_id}) "
+            f"(local — push to sync)[/green]"
+        )
+    else:
+        out.json({"ok": True, "name": name, "color": color, "id": temp_id})
 
 
 @label_app.command("delete")
@@ -109,8 +94,9 @@ def delete(
     name: str = typer.Argument(help="Label name"),
 ) -> None:
     """Delete a board label (local-first, push to sync)."""
+    out = get_output()
     cache_dir = _cache_dir()
-    labels = _load_labels(cache_dir)
+    labels = read_labels_raw("working", cache_dir)
 
     target_idx = None
     for i, lbl in enumerate(labels):
@@ -119,25 +105,21 @@ def delete(
             break
 
     if target_idx is None:
-        console.print(f"[red]Label '{name}' not found[/red]")
+        out.error(f"Label '{name}' not found")
         raise typer.Exit(1)
 
     # Warn if any cards use this label
-    working_cards_dir = cache_dir / "working" / "cards"
-    if working_cards_dir.exists():
-        from trache.cache.store import list_card_files, read_card_file
-
-        using_cards = []
-        for card_path in list_card_files(working_cards_dir):
-            card = read_card_file(card_path)
-            if name in card.labels:
-                using_cards.append(card.title)
-        if using_cards:
-            console.print(
-                f"[yellow]Warning: {len(using_cards)} card(s) use this label: "
-                f"{', '.join(using_cards[:5])}[/yellow]"
-            )
+    working_cards = list_cards("working", cache_dir)
+    using_cards = [c.title for c in working_cards if name in c.labels]
+    if using_cards:
+        out.human(
+            f"[yellow]Warning: {len(using_cards)} card(s) use this label: "
+            f"{', '.join(using_cards[:5])}[/yellow]"
+        )
 
     labels.pop(target_idx)
-    _save_labels(labels, cache_dir)
-    console.print(f"[yellow]Label deleted: {name} (local — push to sync)[/yellow]")
+    write_labels_raw(labels, "working", cache_dir)
+    if out.is_human:
+        out.human(f"[yellow]Label deleted: {name} (local — push to sync)[/yellow]")
+    else:
+        out.json({"ok": True, "name": name})

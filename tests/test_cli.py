@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from typer.testing import CliRunner
 
+from trache.cache.db import list_cards, read_checklists_raw, write_card, write_checklists_raw
 from trache.cache.index import build_index
 from trache.cache.models import Card, TrelloList
-from trache.cache.store import write_card_file
 from trache.cli.app import app
 from trache.config import TracheConfig, ensure_cache_structure
 
@@ -20,7 +19,11 @@ def _setup_cli_cache(tmp_path: Path, monkeypatch) -> Path:
     """Set up a full .trache/ directory for CLI tests and chdir into tmp_path.
 
     Uses multi-board layout: .trache/boards/test/...
+    Sets TRACHE_HUMAN=1 so CLI tests get Rich-formatted output.
     """
+    monkeypatch.setenv("TRACHE_HUMAN", "1")
+    from trache.cli._output import reset_output
+    reset_output()
     monkeypatch.chdir(tmp_path)
     trache_root = tmp_path / ".trache"
     trache_root.mkdir(exist_ok=True)
@@ -38,8 +41,8 @@ def _setup_cli_cache(tmp_path: Path, monkeypatch) -> Path:
         title="Test Card",
     )
     lists = [TrelloList(id="list1", name="To Do", board_id="board1", pos=1)]
-    write_card_file(card, cache_dir / "clean" / "cards")
-    write_card_file(card, cache_dir / "working" / "cards")
+    write_card(card, "clean", cache_dir)
+    write_card(card, "working", cache_dir)
     build_index([card], lists, cache_dir / "indexes")
 
     cl_data = [
@@ -54,11 +57,8 @@ def _setup_cli_cache(tmp_path: Path, monkeypatch) -> Path:
             ],
         }
     ]
-    cl_json = json.dumps(cl_data, indent=2) + "\n"
-    (cache_dir / "clean" / "checklists").mkdir(parents=True, exist_ok=True)
-    (cache_dir / "working" / "checklists").mkdir(parents=True, exist_ok=True)
-    (cache_dir / "clean" / "checklists" / "67abc123def4567890fedcba.json").write_text(cl_json)
-    (cache_dir / "working" / "checklists" / "67abc123def4567890fedcba.json").write_text(cl_json)
+    write_checklists_raw("67abc123def4567890fedcba", cl_data, "clean", cache_dir)
+    write_checklists_raw("67abc123def4567890fedcba", cl_data, "working", cache_dir)
 
     return cache_dir
 
@@ -81,7 +81,10 @@ class TestInit:
 
 
 class TestVersion:
-    def test_version(self) -> None:
+    def test_version(self, monkeypatch) -> None:
+        monkeypatch.setenv("TRACHE_HUMAN", "1")
+        from trache.cli._output import reset_output
+        reset_output()
         result = runner.invoke(app, ["version"])
         assert result.exit_code == 0
         assert "trache " in result.output and any(v in result.output for v in ["0.1.", "0.2."])
@@ -89,6 +92,9 @@ class TestVersion:
 
 class TestStatus:
     def test_status_no_cache(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setenv("TRACHE_HUMAN", "1")
+        from trache.cli._output import reset_output
+        reset_output()
         monkeypatch.chdir(tmp_path)
         result = runner.invoke(app, ["status"])
         # No .trache/ directory → empty diff → reports clean
@@ -104,9 +110,7 @@ class TestChecklistCheck:
         assert "complete" in result.output
 
         # Verify the item state changed in working
-        cl_data = json.loads(
-            (cache_dir / "working" / "checklists" / "67abc123def4567890fedcba.json").read_text()
-        )
+        cl_data = read_checklists_raw("67abc123def4567890fedcba", "working", cache_dir)
         item = cl_data[0]["items"][0]
         assert item["state"] == "complete"
 
@@ -124,9 +128,7 @@ class TestChecklistUncheck:
         assert result.exit_code == 0
         assert "incomplete" in result.output
 
-        cl_data = json.loads(
-            (cache_dir / "working" / "checklists" / "67abc123def4567890fedcba.json").read_text()
-        )
+        cl_data = read_checklists_raw("67abc123def4567890fedcba", "working", cache_dir)
         item = cl_data[0]["items"][1]
         assert item["state"] == "incomplete"
 
@@ -144,9 +146,7 @@ class TestChecklistAddItem:
         assert result.exit_code == 0
         assert "New Task" in result.output
 
-        cl_data = json.loads(
-            (cache_dir / "working" / "checklists" / "67abc123def4567890fedcba.json").read_text()
-        )
+        cl_data = read_checklists_raw("67abc123def4567890fedcba", "working", cache_dir)
         assert len(cl_data[0]["items"]) == 3
         new_item = cl_data[0]["items"][2]
         assert new_item["name"] == "New Task"
@@ -167,9 +167,7 @@ class TestChecklistRemoveItem:
         assert result.exit_code == 0
         assert "removed" in result.output.lower()
 
-        cl_data = json.loads(
-            (cache_dir / "working" / "checklists" / "67abc123def4567890fedcba.json").read_text()
-        )
+        cl_data = read_checklists_raw("67abc123def4567890fedcba", "working", cache_dir)
         assert len(cl_data[0]["items"]) == 1
         assert cl_data[0]["items"][0]["id"] == "ci002"
 
@@ -195,11 +193,11 @@ class TestCardShowDisplaysChecklists:
         assert "[x]" in result.output  # complete item
 
     def test_card_show_no_checklists(self, tmp_path: Path, monkeypatch) -> None:
-        """Card with no checklist JSON file should still show without errors."""
+        """Card with no checklists should still show without errors."""
         _setup_cli_cache(tmp_path, monkeypatch)
-        # Remove the checklist file
+        # Clear checklists for this card in the working copy
         cache_dir = tmp_path / ".trache" / "boards" / "test"
-        (cache_dir / "working" / "checklists" / "67abc123def4567890fedcba.json").unlink()
+        write_checklists_raw("67abc123def4567890fedcba", [], "working", cache_dir)
         result = runner.invoke(app, ["card", "show", "FEDCBA"])
         assert result.exit_code == 0
         assert "Test Card" in result.output
@@ -412,16 +410,15 @@ class TestBuildAuthUrl:
 class TestCardCreateTempMarker:
     def test_create_card_uid6_ends_with_temp_marker(self, tmp_path: Path, monkeypatch) -> None:
         """Locally created cards should have UID6 ending with 'T~'."""
-        _setup_cli_cache(tmp_path, monkeypatch)
+        cache_dir = _setup_cli_cache(tmp_path, monkeypatch)
         result = runner.invoke(app, ["card", "create", "To Do", "My New Card"])
         assert result.exit_code == 0
 
-        # Find the newly created card file in working/cards
-        working_cards = tmp_path / ".trache" / "boards" / "test" / "working" / "cards"
-        new_files = [f for f in working_cards.glob("*.md") if "new_" in f.stem]
-        assert len(new_files) == 1
-        # The filename stem is the card ID; uid6 = stem[-6:].upper()
-        uid6 = new_files[0].stem[-6:].upper()
+        # Find the newly created card in the working copy via SQLite
+        cards = list_cards("working", cache_dir)
+        new_cards = [c for c in cards if c.id.startswith("new_")]
+        assert len(new_cards) == 1
+        uid6 = new_cards[0].uid6
         assert uid6.endswith("T~"), f"Expected UID6 ending with 'T~', got '{uid6}'"
 
 

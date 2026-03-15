@@ -9,13 +9,14 @@ Covers:
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
+from trache.cache.db import read_card, write_card, write_labels_raw
 from trache.cache.models import Card
-from trache.cache.store import read_card_file, write_card_file
 from trache.sync.pull import pull_full_board
 from trache.sync.push import push_changes
 
@@ -43,7 +44,7 @@ class TestLabelOrderDoesNotBumpContentModifiedAt:
         client = make_mock_client([card])
         pull_full_board(config, client, cache_dir, force=True)
 
-        stored = read_card_file(cache_dir / "clean" / "cards" / "67abc123def4567890fedcba.md")
+        stored = read_card("67abc123def4567890fedcba", "clean", cache_dir)
         first_modified = stored.content_modified_at
 
         # Re-pull with labels in REVERSED order, same content otherwise
@@ -61,7 +62,7 @@ class TestLabelOrderDoesNotBumpContentModifiedAt:
         client2 = make_mock_client([card_v2])
         pull_full_board(config, client2, cache_dir, force=True)
 
-        stored2 = read_card_file(cache_dir / "clean" / "cards" / "67abc123def4567890fedcba.md")
+        stored2 = read_card("67abc123def4567890fedcba", "clean", cache_dir)
         assert stored2.content_modified_at == first_modified
 
 
@@ -81,13 +82,13 @@ class TestLabelOnlyPushNoRedundantDesc:
             last_activity=datetime(2026, 3, 10, 12, 0, 0, tzinfo=timezone.utc),
         )
 
-        write_card_file(card, cache_dir / "clean" / "cards")
+        write_card(card, "clean", cache_dir)
         labels_data = [
             {"id": "lbl1", "name": "bug", "color": "red"},
             {"id": "lbl2", "name": "feature", "color": "blue"},
         ]
-        (cache_dir / "clean" / "labels.json").write_text(json.dumps(labels_data, indent=2))
-        (cache_dir / "working" / "labels.json").write_text(json.dumps(labels_data, indent=2))
+        write_labels_raw(labels_data, "clean", cache_dir)
+        write_labels_raw(labels_data, "working", cache_dir)
 
         # Change only labels in working copy
         working_card = Card(
@@ -100,7 +101,7 @@ class TestLabelOnlyPushNoRedundantDesc:
             content_modified_at=datetime(2026, 3, 10, 12, 0, 0, tzinfo=timezone.utc),
             last_activity=datetime(2026, 3, 10, 12, 0, 0, tzinfo=timezone.utc),
         )
-        write_card_file(working_card, cache_dir / "working" / "cards")
+        write_card(working_card, "working", cache_dir)
 
         client = MagicMock()
         client.update_card.return_value = working_card
@@ -131,9 +132,9 @@ class TestRepullFailureSurfaced:
             title="Card",
             description="Desc",
         )
-        write_card_file(card, cache_dir / "clean" / "cards")
+        write_card(card, "clean", cache_dir)
         card.title = "Modified"
-        write_card_file(card, cache_dir / "working" / "cards")
+        write_card(card, "working", cache_dir)
 
         client = MagicMock()
         client.update_card.return_value = card
@@ -147,28 +148,7 @@ class TestRepullFailureSurfaced:
 
 
 class TestOldChecklistsMigration:
+    @pytest.mark.skip(reason="old checklists dir migration not applicable with SQLite backend")
     def test_old_checklists_dir_removed_on_pull(self, tmp_path: Path) -> None:
         """Old flat checklists/ dir is cleaned up during full board pull."""
-        cache_dir, config = setup_cache(tmp_path)
-
-        # Create old-style flat checklists/ dir
-        old_cl_dir = cache_dir / "checklists"
-        old_cl_dir.mkdir(parents=True, exist_ok=True)
-        (old_cl_dir / "67abc123def4567890fedcba.json").write_text("[]")
-
-        assert old_cl_dir.exists()
-
-        card = Card(
-            id="67abc123def4567890fedcba",
-            board_id="board1",
-            list_id="list1",
-            title="Card",
-        )
-        client = make_mock_client([card])
-        pull_full_board(config, client, cache_dir, force=True)
-
-        # Old dir should be gone
-        assert not old_cl_dir.exists()
-        # New per-side dirs should exist
-        assert (cache_dir / "clean" / "checklists").exists()
-        assert (cache_dir / "working" / "checklists").exists()
+        pass
