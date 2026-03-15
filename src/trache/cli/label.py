@@ -53,9 +53,8 @@ def list_labels() -> None:
         for lbl in labels:
             name = lbl.get("name", "")
             color = lbl.get("color", "")
-            if name:
-                rows.append([name, color])
-        out.tsv(rows, header=["name", "color"])
+            rows.append([lbl.get("id", ""), name, color])
+        out.tsv(rows, header=["id", "name", "color"])
 
 
 @label_app.command("create")
@@ -108,18 +107,19 @@ def delete(
         out.error(f"Label '{name}' not found")
         raise typer.Exit(1)
 
-    # Warn if any cards use this label
+    # Check which cards use this label
     working_cards = list_cards("working", cache_dir)
     using_cards = [c.title for c in working_cards if name in c.labels]
-    if using_cards:
-        out.human(
-            f"[yellow]Warning: {len(using_cards)} card(s) use this label: "
-            f"{', '.join(using_cards[:5])}[/yellow]"
-        )
 
     labels.pop(target_idx)
     write_labels_raw(labels, "working", cache_dir)
+
     if out.is_human:
+        if using_cards:
+            out.human(
+                f"[yellow]Warning: {len(using_cards)} card(s) use this label: "
+                f"{', '.join(using_cards[:5])}[/yellow]"
+            )
         out.human(f"[yellow]Label deleted: {name} (local — push to sync)[/yellow]")
     else:
         out.json({

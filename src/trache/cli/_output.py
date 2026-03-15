@@ -48,24 +48,33 @@ class OutputWriter:
         if self._human:
             self._console.print(table)
 
-    def error(self, message: str) -> None:
+    def error(self, message: str, **extra) -> None:
         """Errors to stderr. JSON in machine mode, Rich in human mode."""
         if self._human:
             self._console.print(f"[red]{message}[/red]")
         else:
-            print(json.dumps({"error": message}, separators=(",", ":")), file=sys.stderr)
+            payload = {"error": message, **extra}
+            print(json.dumps(payload, separators=(",", ":"), default=str), file=sys.stderr)
 
     def api_stats(self) -> None:
-        """API stats — human mode only."""
-        if not self._human:
-            return
+        """Emit API stats: human-readable to console, or JSON to stderr in machine mode."""
         from trache.api.client import get_api_stats
 
         stats = get_api_stats()
-        if stats["calls"] > 0:
+        if stats["calls"] == 0:
+            return
+        if self._human:
             self._console.print(
                 f"[dim]({int(stats['calls'])} API calls, "
                 f"{stats['total_ms'] / 1000:.1f}s)[/dim]"
+            )
+        else:
+            print(
+                json.dumps(
+                    {"api_calls": int(stats["calls"]), "api_ms": int(stats["total_ms"])},
+                    separators=(",", ":"),
+                ),
+                file=sys.stderr,
             )
 
 

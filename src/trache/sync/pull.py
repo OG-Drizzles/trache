@@ -253,11 +253,12 @@ def pull_list(
         for card in cards:
             _check_card_dirty(card.id, cache_dir, force)
 
-    # Fetch checklists per card
-    all_checklists: list[Checklist] = []
-    for card in cards:
-        card_cls = client.get_card_checklists(card.id)
-        all_checklists.extend(card_cls)
+    # Batch-fetch all board checklists, then filter to cards in this list
+    card_ids_in_list = {card.id for card in cards}
+    board_checklists = client.get_board_checklists(config.board_id)
+    all_checklists: list[Checklist] = [
+        cl for cl in board_checklists if cl.card_id in card_ids_in_list
+    ]
 
     # Attach checklists to cards
     _attach_checklists(cards, all_checklists)

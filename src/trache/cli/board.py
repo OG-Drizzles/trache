@@ -27,7 +27,10 @@ def list_boards() -> None:
     out = get_output()
     boards = list_board_names()
     if not boards:
-        out.human("[dim]No boards configured. Run 'trache init' first.[/dim]")
+        if out.is_human:
+            out.human("[dim]No boards configured. Run 'trache init' first.[/dim]")
+        else:
+            out.tsv([], header=["alias", "board_name", "last_pull", "active"])
         return
 
     try:
@@ -98,8 +101,8 @@ def switch(
     out = get_output()
     boards = list_board_names()
     if alias not in boards:
-        out.error(f"Board '{alias}' not found.")
-        if boards:
+        out.error(f"Board '{alias}' not found.", available_boards=boards)
+        if out.is_human and boards:
             out.human(f"Available boards: {', '.join(boards)}")
         raise typer.Exit(1)
 
@@ -153,6 +156,7 @@ def offboard(
             pass  # If diff fails (e.g. no cards), proceed
 
     # Archive on Trello if requested
+    archived_on_trello = False
     if archive:
         from trache.cli._context import get_client_and_config
 
@@ -160,6 +164,7 @@ def offboard(
             client, config = get_client_and_config(board_dir)
             with client:
                 client.close_board(config.board_id)
+            archived_on_trello = True
             out.human("[green]Archived board on Trello[/green]")
         except Exception as e:
             out.error(f"Failed to archive on Trello: {e}")
@@ -180,11 +185,13 @@ def offboard(
     except FileNotFoundError:
         active = None
 
+    new_active_board = None
     if active == alias:
         remaining = list_board_names()
         if remaining:
-            set_active_board(remaining[0])
-            out.human(f"Switched active board to: {remaining[0]}")
+            new_active_board = remaining[0]
+            set_active_board(new_active_board)
+            out.human(f"Switched active board to: {new_active_board}")
         else:
             active_file = TRACHE_ROOT / "active"
             if active_file.exists():
@@ -193,4 +200,9 @@ def offboard(
     if out.is_human:
         out.human(f"[green]Offboarded board: {alias}[/green]")
     else:
-        out.json({"ok": True, "alias": alias})
+        out.json({
+            "ok": True,
+            "alias": alias,
+            "archived_on_trello": archived_on_trello,
+            "new_active_board": new_active_board,
+        })

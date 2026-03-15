@@ -179,7 +179,7 @@ def edit_desc(
     if out.is_human:
         out.human(f"[green]Description updated: {escape(card.title)} [{card.uid6}][/green]")
     else:
-        out.json({"ok": True, "uid6": card.uid6, "title": card.title})
+        out.json({"ok": True, "uid6": card.uid6, "title": card.title, "description": card.description})
 
 
 @card_app.command("move")
@@ -201,7 +201,7 @@ def move(
     if out.is_human:
         out.human(f"[green]Moved {escape(card.title)} [{card.uid6}] to list {escape(list_display)}[/green]")
     else:
-        out.json({"ok": True, "uid6": card.uid6, "title": card.title, "list": list_display})
+        out.json({"ok": True, "uid6": card.uid6, "title": card.title, "list_id": card.list_id, "list_name": list_display})
 
 
 @card_app.command("create")
@@ -222,7 +222,7 @@ def create(
     if out.is_human:
         out.human(f"[green]Created: {escape(card.title)} [{card.uid6}] (local only — push to sync)[/green]")
     else:
-        out.json({"ok": True, "uid6": card.uid6, "title": card.title})
+        out.json({"ok": True, "uid6": card.uid6, "title": card.title, "list_id": card.list_id})
 
 
 @card_app.command("archive")

@@ -30,8 +30,12 @@ def show_lists() -> None:
     cards_index = load_cards_index(cache_dir)
 
     if not lists_index:
-        out.human("[dim]No lists found. Run `trache pull` first.[/dim]")
-        raise typer.Exit(1)
+        if out.is_human:
+            out.human("[dim]No lists found. Run `trache pull` first.[/dim]")
+            raise typer.Exit(1)
+        else:
+            out.tsv([], header=["name", "card_count"])
+            return
 
     # Count cards per list
     cards_per_list: dict[str, int] = {}
@@ -116,7 +120,7 @@ def archive(
     yes: bool = typer.Option(False, "--yes", "-y", help="Confirm archiving"),
 ) -> None:
     """Archive (close) a list (API-direct). Requires --yes flag."""
-    from trache.cache.db import remove_list, resolve_list_id
+    from trache.cache.db import remove_list, resolve_list_id, resolve_list_name
 
     out = get_output()
 
@@ -126,6 +130,7 @@ def archive(
 
     cache_dir = _cache_dir()
     list_id = resolve_list_id(identifier, cache_dir)
+    list_name = resolve_list_name(list_id, cache_dir)
 
     client, _config = get_client_and_config(cache_dir)
     with client:
@@ -135,4 +140,4 @@ def archive(
     if out.is_human:
         out.human("[green]Archived list (API — effective immediately)[/green]")
     else:
-        out.json({"ok": True, "id": list_id})
+        out.json({"ok": True, "id": list_id, "name": list_name})

@@ -321,17 +321,32 @@ class TestAgents:
         assert "copy below this line" not in result.output
         assert "Agent setup block" not in result.output
 
-    def test_init_prints_agent_guidance(self, tmp_path: Path, monkeypatch) -> None:
+    def test_init_machine_includes_install_block(self, tmp_path: Path, monkeypatch) -> None:
+        """Machine mode: init returns JSON with install_block field."""
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("TRELLO_API_KEY", "test_key")
         monkeypatch.setenv("TRELLO_TOKEN", "test_token")
 
         result = runner.invoke(app, ["init", "--board-id", "abc123def456789012345678"])
+        import json
+        data = json.loads(result.output)
+        assert data["ok"] is True
+        assert "install_block" in data
+        assert "local-first" in data["install_block"].lower()
+        assert "trache agents --reference" in data["install_block"]
+
+    def test_init_human_prints_agent_guidance(self, tmp_path: Path, monkeypatch) -> None:
+        """Human mode: init prints Rich agent guidance panels."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("TRELLO_API_KEY", "test_key")
+        monkeypatch.setenv("TRELLO_TOKEN", "test_token")
+        monkeypatch.setenv("TRACHE_HUMAN", "1")
+        from trache.cli._output import reset_output
+        reset_output()
+
+        result = runner.invoke(app, ["init", "--board-id", "abc123def456789012345678"])
         output = result.output
-        # Install block content
         assert "local-first" in output.lower()
-        assert "trache agents --reference" in output
-        # Human fallback note
         assert "setting this up manually" in output.lower()
 
     def test_preamble_and_human_note_outside_copy_block(self) -> None:

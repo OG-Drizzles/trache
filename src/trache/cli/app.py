@@ -187,12 +187,18 @@ def init(
 
     if out.is_human:
         out.human(f"[green]Initialised board '{alias}' for {config.board_id}[/green]")
+        from trache.cli.agents import print_init_agent_guidance
+
+        print_init_agent_guidance(board_name=getattr(config, "board_name", None))
     else:
-        out.json({"ok": True, "alias": alias, "board_id": config.board_id})
+        from trache.cli.agents import render_install_block
 
-    from trache.cli.agents import print_init_agent_guidance
-
-    print_init_agent_guidance(board_name=getattr(config, "board_name", None))
+        out.json({
+            "ok": True,
+            "alias": alias,
+            "board_id": config.board_id,
+            "install_block": render_install_block(board_name=getattr(config, "board_name", None)),
+        })
 
 
 @app.command()
@@ -217,9 +223,16 @@ def pull(
                 if out.is_human:
                     out.human(f"[green]Pulled card: {escape(result.title)} [{result.uid6}][/green]")
                 else:
+                    from trache.cache.db import read_checklists_raw, resolve_list_name
                     out.json({
                         "uid6": result.uid6, "title": result.title,
-                        "list": result.list_id, "description": result.description,
+                        "list_id": result.list_id,
+                        "list_name": resolve_list_name(result.list_id, cache_dir),
+                        "description": result.description,
+                        "labels": result.labels,
+                        "due": result.due.isoformat() if result.due else None,
+                        "closed": result.closed,
+                        "checklists": read_checklists_raw(result.id, "working", cache_dir),
                     })
             elif list_name:
                 cards = pull_list(list_name, config, client, cache_dir, force=force)
@@ -233,10 +246,11 @@ def pull(
                         f'[green]Pulled {len(cards)} cards from list "{escape(display_name)}"[/green]'
                     )
                 else:
+                    from trache.cache.db import resolve_list_name as _rln
                     out.json({
                         "cards": len(cards),
                         "card_summaries": [
-                            {"uid6": c.uid6, "title": c.title, "list": c.list_id}
+                            {"uid6": c.uid6, "title": c.title, "list_name": _rln(c.list_id, cache_dir)}
                             for c in cards
                         ],
                     })
@@ -291,7 +305,7 @@ def status() -> None:
         if out.is_human:
             out.human("Clean — no local changes.")
         else:
-            out.json({"added": [], "modified": [], "deleted": []})
+            out.json({"added": [], "modified": [], "deleted": [], "label_changes": []})
         return
     try:
         cache_dir = resolve_cache_dir()
@@ -299,7 +313,7 @@ def status() -> None:
         if out.is_human:
             out.human("Clean — no local changes.")
         else:
-            out.json({"added": [], "modified": [], "deleted": []})
+            out.json({"added": [], "modified": [], "deleted": [], "label_changes": []})
         return
     changeset = compute_diff(cache_dir)
 
@@ -510,9 +524,16 @@ def sync(
                 out.human(
                     f"[green]Pulled card: {escape(pull_result.title)} [{pull_result.uid6}][/green]"
                 )
+                from trache.cache.db import read_checklists_raw, resolve_list_name
                 pull_data = {
                     "uid6": pull_result.uid6, "title": pull_result.title,
-                    "list": pull_result.list_id, "description": pull_result.description,
+                    "list_id": pull_result.list_id,
+                    "list_name": resolve_list_name(pull_result.list_id, cache_dir),
+                    "description": pull_result.description,
+                    "labels": pull_result.labels,
+                    "due": pull_result.due.isoformat() if pull_result.due else None,
+                    "closed": pull_result.closed,
+                    "checklists": read_checklists_raw(pull_result.id, "working", cache_dir),
                 }
             else:
                 pull_result = pull_full_board(config, client, cache_dir, force=True)
@@ -531,6 +552,13 @@ def sync(
                         "lists": pull_result.lists,
                         "labels": pull_result.labels,
                         "checklists": pull_result.checklists,
+                        "card_summaries": [
+                            {"uid6": s.uid6, "title": s.title, "list": s.list_name}
+                            for s in pull_result.card_summaries
+                        ],
+                        "list_summaries": [
+                            {"name": s.name} for s in pull_result.list_summaries
+                        ],
                     }
         else:
             out.human("[yellow]Dry run — skipping pull[/yellow]")

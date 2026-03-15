@@ -46,13 +46,14 @@ def _register_handlers() -> None:
         if len(args) < 2:
             return {"ok": False, "error": "Usage: card edit-desc <uid6> <desc>"}
         card = edit_description(args[0], args[1], cache_dir)
-        return {"ok": True, "uid6": card.uid6, "title": card.title}
+        return {"ok": True, "uid6": card.uid6, "title": card.title, "description": card.description}
 
     def _handle_move(args: list[str], cache_dir: Path, board_id: str) -> dict:
         if len(args) < 2:
             return {"ok": False, "error": "Usage: card move <uid6> <list>"}
+        from trache.cache.db import resolve_list_name
         card = move_card(args[0], args[1], cache_dir)
-        return {"ok": True, "uid6": card.uid6, "title": card.title}
+        return {"ok": True, "uid6": card.uid6, "title": card.title, "list_id": card.list_id, "list_name": resolve_list_name(card.list_id, cache_dir)}
 
     def _handle_create(args: list[str], cache_dir: Path, board_id: str) -> dict:
         if len(args) < 2:
@@ -65,7 +66,7 @@ def _register_handlers() -> None:
                 args = args[:i] + args[i + 2:]
                 break
         card = create_card(args[0], args[1], cache_dir, board_id, desc)
-        return {"ok": True, "uid6": card.uid6, "title": card.title}
+        return {"ok": True, "uid6": card.uid6, "title": card.title, "list_id": card.list_id}
 
     def _handle_archive(args: list[str], cache_dir: Path, board_id: str) -> dict:
         if len(args) < 1:
