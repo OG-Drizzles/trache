@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
@@ -17,7 +16,7 @@ from trache.cache.db import (
     write_labels_raw,
 )
 from trache.cache.diff import CardChange, Changeset, ChecklistChange, LabelChange, compute_diff
-from trache.config import SyncState, TracheConfig
+from trache.config import TracheConfig
 from trache.identity import generate_block, inject_block
 from trache.sync.pull import pull_card
 

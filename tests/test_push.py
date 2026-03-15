@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -221,7 +220,9 @@ class TestPushNewCardChecklists:
         write_checklists_raw(temp_id, cl_data, "working", cache_dir)
 
         # Mock client
-        real_card = Card(id="real_trello_card_id_here", title="Card With Checklist", list_id="list1")
+        real_card = Card(
+            id="real_trello_card_id_here", title="Card With Checklist", list_id="list1"
+        )
         new_cl = Checklist(id="real_cl_1", name="Tasks", card_id=real_card.id)
         item_a = ChecklistItem(id="real_item_a", name="Do thing A")
         item_b = ChecklistItem(id="real_item_b", name="Do thing B")

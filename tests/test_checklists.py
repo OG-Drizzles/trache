@@ -5,12 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
+from conftest import seed_board
+
 from trache.cache.db import read_checklists_raw, write_card, write_checklists_raw
 from trache.cache.diff import compute_diff
 from trache.cache.models import Card, ChecklistItem, TrelloList
 from trache.config import TracheConfig, ensure_cache_structure
-
-from conftest import seed_board
 
 
 def _setup_card_with_checklists(cache_dir: Path) -> tuple[Card, list[dict]]:

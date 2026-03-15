@@ -107,7 +107,8 @@ def rename(
     update_list(trello_list.id, trello_list.name, trello_list.pos, cache_dir)
     if out.is_human:
         out.human(
-            f"[green]Renamed list → {escape(trello_list.name)} (API — available immediately)[/green]"
+            f"[green]Renamed list → {escape(trello_list.name)}"
+            f" (API — available immediately)[/green]"
         )
     else:
         out.json({"ok": True, "id": trello_list.id, "name": trello_list.name})

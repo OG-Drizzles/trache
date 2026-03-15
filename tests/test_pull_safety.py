@@ -2,21 +2,19 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-
-import json
+from conftest import seed_board, setup_cache
 
 from trache.cache.db import read_card, write_card, write_lists
 from trache.cache.models import Board, Card, Label, TrelloList
 from trache.config import TracheConfig, ensure_cache_structure
 from trache.sync.pull import pull_full_board
 from trache.sync.push import push_changes
-
-from conftest import seed_board, setup_cache
 
 
 def _make_client(cards, lists=None, activity=None):
@@ -237,15 +235,21 @@ class TestSyncMachineOutput:
             id="67abc123def4567890fedcba", board_id="board1",
             list_id="list1", title="Updated",
         )
-        client = _make_client([post_push], [TrelloList(id="list1", name="To Do", board_id="board1", pos=1)])
+        client = _make_client(
+            [post_push], [TrelloList(id="list1", name="To Do", board_id="board1", pos=1)]
+        )
         client.update_card.return_value = post_push
         client.get_card.return_value = post_push
         client.get_card_checklists.return_value = []
 
         with monkeypatch.context() as m:
-            m.setattr("trache.cli.app.get_client_and_config", lambda _: (client, TracheConfig(board_id="board1")))
-            from trache.cli.app import app
+            m.setattr(
+                "trache.cli.app.get_client_and_config",
+                lambda _: (client, TracheConfig(board_id="board1")),
+            )
             from typer.testing import CliRunner
+
+            from trache.cli.app import app
             runner = CliRunner()
             result = runner.invoke(app, ["sync"])
 
@@ -268,9 +272,13 @@ class TestSyncMachineOutput:
 
         client = _make_client([], [])
         with monkeypatch.context() as m:
-            m.setattr("trache.cli.app.get_client_and_config", lambda _: (client, TracheConfig(board_id="board1")))
-            from trache.cli.app import app
+            m.setattr(
+                "trache.cli.app.get_client_and_config",
+                lambda _: (client, TracheConfig(board_id="board1")),
+            )
             from typer.testing import CliRunner
+
+            from trache.cli.app import app
             runner = CliRunner()
             result = runner.invoke(app, ["sync", "--dry-run"])
 

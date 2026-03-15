@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from conftest import seed_board
 from typer.testing import CliRunner
 
 from trache.cache.db import list_cards, read_checklists_raw, write_card, write_checklists_raw
 from trache.cache.models import Card, TrelloList
 from trache.cli.app import app
 from trache.config import TracheConfig, ensure_cache_structure
-
-from conftest import seed_board
 
 runner = CliRunner()
 
@@ -88,7 +87,8 @@ class TestVersion:
         reset_output()
         result = runner.invoke(app, ["version"])
         assert result.exit_code == 0
-        assert "trache " in result.output and any(v in result.output for v in ["0.1.", "0.2.", "0.3."])
+        versions = ["0.1.", "0.2.", "0.3."]
+        assert "trache " in result.output and any(v in result.output for v in versions)
 
 
 class TestStatus:

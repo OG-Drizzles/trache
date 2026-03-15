@@ -170,7 +170,7 @@ def _cleanup_file_dirs(cache_dir: Path) -> None:
 
 def _migrate_files_to_db(cache_dir: Path) -> None:
     """Read all file-based data and INSERT into SQLite in one transaction."""
-    from trache.cache.store import list_card_files, markdown_to_card, read_card_file
+    from trache.cache.store import list_card_files, read_card_file
 
     with _connect(cache_dir) as conn:
         # Migrate cards (clean + working)
@@ -716,7 +716,8 @@ def load_cards_index(cache_dir: Path) -> dict[str, dict]:
     """Load a cards-by-id index dict (matches old index.json format)."""
     with _connect(cache_dir) as conn:
         rows = conn.execute(
-            "SELECT id, uid6, title, list_id, content_modified_at FROM cards WHERE copy = 'working' ORDER BY pos, id"
+            "SELECT id, uid6, title, list_id, content_modified_at FROM cards"
+            " WHERE copy = 'working' ORDER BY pos, id"
         ).fetchall()
     return {
         r["id"]: {

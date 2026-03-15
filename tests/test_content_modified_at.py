@@ -9,11 +9,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
+from conftest import make_mock_client, setup_cache
+
 from trache.cache.db import read_card, write_card
 from trache.cache.models import Card, TrelloList
 from trache.sync.pull import pull_full_board
-
-from conftest import make_mock_client, setup_cache
 
 
 class TestContentModifiedAtPreservation:
@@ -134,6 +134,7 @@ class TestContentModifiedAtPreservation:
     def test_local_edit_updates_content_modified_at(self, tmp_path: Path) -> None:
         """Local title edit updates content_modified_at."""
         from conftest import seed_board
+
         from trache.cache.working import edit_title
 
         cache_dir, config = setup_cache(tmp_path)
@@ -188,6 +189,7 @@ class TestContentModifiedAtPreservation:
     def test_list_move_updates_content_modified_at(self, tmp_path: Path) -> None:
         """Moving a card to a different list updates content_modified_at."""
         from conftest import seed_board
+
         from trache.cache.working import move_card
 
         cache_dir, config = setup_cache(tmp_path)

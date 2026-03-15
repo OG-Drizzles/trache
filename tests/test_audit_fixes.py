@@ -13,14 +13,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
+from conftest import make_mock_client, setup_cache
 
 from trache.cache.db import read_card, write_card, write_labels_raw
 from trache.cache.models import Card
 from trache.sync.pull import pull_full_board
 from trache.sync.push import push_changes
-
-from conftest import make_mock_client, setup_cache
 
 
 class TestLabelOrderDoesNotBumpContentModifiedAt:

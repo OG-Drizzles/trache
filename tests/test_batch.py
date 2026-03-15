@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import json
-from io import StringIO
 from pathlib import Path
-from unittest.mock import patch
 
+from conftest import seed_board
 from typer.testing import CliRunner
 
 from trache.cache.db import (
@@ -19,8 +18,6 @@ from trache.cache.db import (
 from trache.cache.models import Card, TrelloList
 from trache.cli.app import app
 from trache.config import TracheConfig, ensure_cache_structure
-
-from conftest import seed_board
 
 runner = CliRunner()
 
@@ -35,8 +32,13 @@ def _setup_batch(tmp_path: Path, monkeypatch) -> Path:
     config.save(cache_dir)
     (trache_root / "active").write_text("test\n")
 
-    lists = [TrelloList(id="list1", name="To Do", pos=1), TrelloList(id="list2", name="Done", pos=2)]
-    card = Card(id="67abc123def4567890fedcba", board_id="board1", list_id="list1", title="Test Card")
+    lists = [
+        TrelloList(id="list1", name="To Do", pos=1),
+        TrelloList(id="list2", name="Done", pos=2),
+    ]
+    card = Card(
+        id="67abc123def4567890fedcba", board_id="board1", list_id="list1", title="Test Card"
+    )
     write_card(card, "clean", cache_dir)
     write_card(card, "working", cache_dir)
     write_lists(lists, cache_dir)
@@ -67,7 +69,7 @@ class TestBatchRun:
         assert card.title == "New Title"
 
     def test_multiple_operations(self, tmp_path: Path, monkeypatch) -> None:
-        cache_dir = _setup_batch(tmp_path, monkeypatch)
+        _setup_batch(tmp_path, monkeypatch)
         input_text = (
             'card edit-title FEDCBA "Updated"\n'
             'card move FEDCBA Done\n'
@@ -89,7 +91,7 @@ class TestBatchRun:
         assert "non-batchable" in data[0]["error"].lower() or "Unknown" in data[0]["error"]
 
     def test_blank_and_comment_lines_skipped(self, tmp_path: Path, monkeypatch) -> None:
-        cache_dir = _setup_batch(tmp_path, monkeypatch)
+        _setup_batch(tmp_path, monkeypatch)
         input_text = (
             '# This is a comment\n'
             '\n'

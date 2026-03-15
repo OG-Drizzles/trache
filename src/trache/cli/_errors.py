@@ -7,6 +7,7 @@ from pathlib import Path
 
 import typer
 
+from trache.cache.models import Card
 from trache.cli._output import get_output
 
 
@@ -28,7 +29,7 @@ def handle_resolve_errors(func):
     return wrapper
 
 
-def guard_archived(identifier: str, cache_dir: Path, *, force: bool = False) -> "Card | None":
+def guard_archived(identifier: str, cache_dir: Path, *, force: bool = False) -> Card | None:
     """Block edits to archived cards unless --force is set.
 
     Returns the loaded Card on success (so callers can reuse it), or None
@@ -37,7 +38,6 @@ def guard_archived(identifier: str, cache_dir: Path, *, force: bool = False) -> 
     Raises typer.Exit(1) if the card is archived and force is False.
     Prints a warning if force is True.
     """
-    from trache.cache.models import Card
     from trache.cache.working import read_working_card
 
     out = get_output()

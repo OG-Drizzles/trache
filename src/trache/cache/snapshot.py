@@ -8,7 +8,6 @@ from trache.cache.db import (
     delete_stale_cards,
     list_cards,
     read_card,
-    write_card,
     write_cards_batch,
 )
 from trache.cache.models import Card

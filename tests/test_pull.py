@@ -6,13 +6,12 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from conftest import seed_board
 
 from trache.cache.db import read_card, read_checklists, write_card
 from trache.cache.models import Board, Card, Checklist, ChecklistItem, Label, TrelloList
 from trache.config import TracheConfig, ensure_cache_structure
 from trache.sync.pull import pull_card, pull_full_board, pull_list
-
-from conftest import seed_board
 
 
 def _make_mock_client(cards: list[Card], lists: list[TrelloList]) -> MagicMock:

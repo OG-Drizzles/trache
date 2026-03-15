@@ -196,7 +196,9 @@ def uncheck_checklist_item(identifier: str, item_id: str, cache_dir: Path) -> di
                 if item["id"] == item_id:
                     changed = item["state"] != "incomplete"
                     item["state"] = "incomplete"
-                    return {"ok": True, "item_id": item_id, "state": "incomplete", "changed": changed}
+                    return {
+                        "ok": True, "item_id": item_id, "state": "incomplete", "changed": changed,
+                    }
         raise KeyError(f"Item {item_id} not found")
 
     return _checklist_update(identifier, cache_dir, _mutate)

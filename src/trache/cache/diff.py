@@ -20,7 +20,8 @@ class ChecklistChange:
 
     checklist_id: str
     checklist_name: str
-    change_type: str  # "state_change" | "new_item" | "removed_item" | "text_change" | "new_checklist"
+    # "state_change" | "new_item" | "removed_item" | "text_change" | "new_checklist"
+    change_type: str
     item_id: str = ""
     old_value: str = ""
     new_value: str = ""
@@ -91,13 +92,17 @@ def _compute_checklist_changes(
     clean_cl_names: dict[str, str] = {}
     for cl in clean_cls:
         clean_cl_names[cl.id] = cl.name
-        clean_items[cl.id] = {item.id: {"name": item.name, "state": item.state} for item in cl.items}
+        clean_items[cl.id] = {
+            item.id: {"name": item.name, "state": item.state} for item in cl.items
+        }
 
     working_items: dict[str, dict[str, dict]] = {}
     working_cl_names: dict[str, str] = {}
     for cl in working_cls:
         working_cl_names[cl.id] = cl.name
-        working_items[cl.id] = {item.id: {"name": item.name, "state": item.state} for item in cl.items}
+        working_items[cl.id] = {
+            item.id: {"name": item.name, "state": item.state} for item in cl.items
+        }
 
     # Compare items in each checklist
     all_cl_ids = set(clean_items.keys()) | set(working_items.keys())

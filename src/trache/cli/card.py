@@ -179,7 +179,9 @@ def edit_desc(
     if out.is_human:
         out.human(f"[green]Description updated: {escape(card.title)} [{card.uid6}][/green]")
     else:
-        out.json({"ok": True, "uid6": card.uid6, "title": card.title, "description": card.description})
+        out.json({
+            "ok": True, "uid6": card.uid6, "title": card.title, "description": card.description,
+        })
 
 
 @card_app.command("move")
@@ -199,9 +201,18 @@ def move(
     card = move_card(guarded.id if guarded else identifier, list_target, cache_dir)
     list_display = resolve_list_name(card.list_id, cache_dir)
     if out.is_human:
-        out.human(f"[green]Moved {escape(card.title)} [{card.uid6}] to list {escape(list_display)}[/green]")
+        out.human(
+            f"[green]Moved {escape(card.title)} [{card.uid6}]"
+            f" to list {escape(list_display)}[/green]"
+        )
     else:
-        out.json({"ok": True, "uid6": card.uid6, "title": card.title, "list_id": card.list_id, "list_name": list_display})
+        out.json({
+            "ok": True,
+            "uid6": card.uid6,
+            "title": card.title,
+            "list_id": card.list_id,
+            "list_name": list_display,
+        })
 
 
 @card_app.command("create")
@@ -220,7 +231,10 @@ def create(
     config = TracheConfig.load(cache_dir)
     card = create_card(list_target, title, cache_dir, config.board_id, desc)
     if out.is_human:
-        out.human(f"[green]Created: {escape(card.title)} [{card.uid6}] (local only — push to sync)[/green]")
+        out.human(
+            f"[green]Created: {escape(card.title)} [{card.uid6}]"
+            f" (local only — push to sync)[/green]"
+        )
     else:
         out.json({"ok": True, "uid6": card.uid6, "title": card.title, "list_id": card.list_id})
 
@@ -237,7 +251,8 @@ def archive(
     card = archive_card(identifier, _cache_dir())
     if out.is_human:
         out.human(
-            f"[yellow]Archived: {escape(card.title)} [{card.uid6}] (local only — push to sync)[/yellow]"
+            f"[yellow]Archived: {escape(card.title)} [{card.uid6}]"
+            f" (local only — push to sync)[/yellow]"
         )
     else:
         out.json({"ok": True, "uid6": card.uid6, "title": card.title})
@@ -259,11 +274,19 @@ def add_label_cmd(
     card, added = add_label(guarded.id if guarded else identifier, label, cache_dir)
     if out.is_human:
         if added:
-            out.human(f"[green]Label '{escape(label)}' added to {escape(card.title)} [{card.uid6}][/green]")
+            out.human(
+                f"[green]Label '{escape(label)}' added to"
+                f" {escape(card.title)} [{card.uid6}][/green]"
+            )
         else:
-            out.human(f"Label '{escape(label)}' already present on {escape(card.title)} [{card.uid6}]")
+            out.human(
+                f"Label '{escape(label)}' already present on"
+                f" {escape(card.title)} [{card.uid6}]"
+            )
     else:
-        out.json({"ok": True, "uid6": card.uid6, "title": card.title, "label": label, "added": added})
+        out.json({
+            "ok": True, "uid6": card.uid6, "title": card.title, "label": label, "added": added,
+        })
 
 
 @card_app.command("remove-label")
@@ -283,7 +306,8 @@ def remove_label_cmd(
         card = remove_label(guarded.id if guarded else identifier, label, cache_dir)
         if out.is_human:
             out.human(
-                f"[green]Label '{escape(label)}' removed from {escape(card.title)} [{card.uid6}][/green]"
+                f"[green]Label '{escape(label)}' removed from"
+                f" {escape(card.title)} [{card.uid6}][/green]"
             )
         else:
             out.json({"ok": True, "uid6": card.uid6, "title": card.title, "label": label})

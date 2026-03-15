@@ -2,19 +2,16 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
+from conftest import seed_board
 from typer.testing import CliRunner
 
 from trache.cache.models import Card, TrelloList
 from trache.cache.store import write_card_file
-
-from conftest import seed_board
 from trache.cli._context import (
     _fuzzy_match,
-    list_board_names,
     resolve_cache_dir,
     set_active_board,
     set_board_override,
@@ -29,7 +26,9 @@ runner = CliRunner()
 # --- Helpers ---
 
 
-def _create_board(trache_root: Path, alias: str, board_id: str = "board123", board_name: str = "Test") -> Path:
+def _create_board(
+    trache_root: Path, alias: str, board_id: str = "board123", board_name: str = "Test"
+) -> Path:
     """Create a board directory with config."""
     board_dir = trache_root / "boards" / alias
     ensure_cache_structure(board_dir)
@@ -261,7 +260,9 @@ class TestInitMultiBoard:
         monkeypatch.delenv("TRELLO_API_KEY", raising=False)
         monkeypatch.delenv("TRELLO_TOKEN", raising=False)
 
-        result = runner.invoke(app, ["init", "--board-id", "abc123def456789012345678", "--name", "work"])
+        result = runner.invoke(
+            app, ["init", "--board-id", "abc123def456789012345678", "--name", "work"]
+        )
         assert result.exit_code == 0
         assert (tmp_path / ".trache" / "boards" / "work").exists()
         assert (tmp_path / ".trache" / "boards" / "work" / "config.json").exists()
@@ -276,7 +277,9 @@ class TestInitMultiBoard:
         # First init
         runner.invoke(app, ["init", "--board-id", "abc123def456789012345678", "--name", "work"])
         # Second init with same name
-        result = runner.invoke(app, ["init", "--board-id", "def456789012345678abc123", "--name", "work"])
+        result = runner.invoke(
+            app, ["init", "--board-id", "def456789012345678abc123", "--name", "work"]
+        )
         assert result.exit_code == 1
         assert "already exists" in result.output
 
@@ -287,7 +290,9 @@ class TestInitMultiBoard:
         monkeypatch.delenv("TRELLO_TOKEN", raising=False)
 
         runner.invoke(app, ["init", "--board-id", "abc123def456789012345678", "--name", "work"])
-        result = runner.invoke(app, ["init", "--board-id", "def456789012345678abc123", "--name", "personal"])
+        result = runner.invoke(
+            app, ["init", "--board-id", "def456789012345678abc123", "--name", "personal"]
+        )
         assert result.exit_code == 0
         assert (tmp_path / ".trache" / "boards" / "personal").exists()
         # Active should still be work (first board set)
@@ -332,7 +337,7 @@ class TestLegacyMigration:
         config.save(legacy)
 
         # Run any command — should trigger migration
-        result = resolve_cache_dir()
+        resolve_cache_dir()
         assert (legacy / "boards").exists()
         alias = (legacy / "active").read_text().strip()
         assert alias == "my-legacy-board"

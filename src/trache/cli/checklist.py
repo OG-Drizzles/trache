@@ -27,8 +27,13 @@ def create(
     force: bool = typer.Option(False, "--force", help="Allow editing archived cards"),
 ) -> None:
     """Create a new checklist on a card (local-first, push to sync)."""
-    from trache.cache.db import read_checklists_raw, resolve_card_id, write_checklists_raw
-    from trache.cache.db import read_card, write_card
+    from trache.cache.db import (
+        read_card,
+        read_checklists_raw,
+        resolve_card_id,
+        write_card,
+        write_checklists_raw,
+    )
 
     out = get_output()
     cache_dir = _cache_dir()

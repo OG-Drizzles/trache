@@ -53,7 +53,13 @@ def _register_handlers() -> None:
             return {"ok": False, "error": "Usage: card move <uid6> <list>"}
         from trache.cache.db import resolve_list_name
         card = move_card(args[0], args[1], cache_dir)
-        return {"ok": True, "uid6": card.uid6, "title": card.title, "list_id": card.list_id, "list_name": resolve_list_name(card.list_id, cache_dir)}
+        return {
+            "ok": True,
+            "uid6": card.uid6,
+            "title": card.title,
+            "list_id": card.list_id,
+            "list_name": resolve_list_name(card.list_id, cache_dir),
+        }
 
     def _handle_create(args: list[str], cache_dir: Path, board_id: str) -> dict:
         if len(args) < 2:
@@ -98,7 +104,10 @@ def _register_handlers() -> None:
 
     def _handle_checklist_add_item(args: list[str], cache_dir: Path, board_id: str) -> dict:
         if len(args) < 3:
-            return {"ok": False, "error": "Usage: checklist add-item <uid6> <checklist_name> <text>"}
+            return {
+                "ok": False,
+                "error": "Usage: checklist add-item <uid6> <checklist_name> <text>",
+            }
         return add_checklist_item(args[0], args[1], args[2], cache_dir)
 
     def _handle_checklist_remove_item(args: list[str], cache_dir: Path, board_id: str) -> dict:

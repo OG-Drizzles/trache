@@ -10,19 +10,11 @@ from typing import Optional
 from trache.api.client import TrelloClient
 from trache.cache.db import (
     connect,
-    delete_card,
-    list_cards,
     read_card,
-    read_checklists,
     resolve_card_id,
     resolve_list_id,
-    write_card,
     write_card_pull,
-    write_cards_batch,
-    write_checklists,
     write_full_snapshot,
-    write_labels,
-    write_lists,
 )
 from trache.cache.diff import fields_equal
 from trache.cache.models import Card, Checklist, Label
@@ -177,7 +169,9 @@ def pull_full_board(
         labels=len(labels_list),
         checklists=len(all_checklists),
         card_summaries=[
-            CardSummary(uid6=c.uid6, title=c.title, list_name=list_name_map.get(c.list_id, c.list_id))
+            CardSummary(
+                uid6=c.uid6, title=c.title, list_name=list_name_map.get(c.list_id, c.list_id)
+            )
             for c in cards
         ],
         list_summaries=[ListSummary(name=lst.name) for lst in lists],
@@ -225,8 +219,12 @@ def pull_card(
         # If card is archived/closed, remove from working so it doesn't appear in card list
         if card.closed:
             conn.execute("DELETE FROM cards WHERE id = ? AND copy = 'working'", (card_id,))
-            conn.execute("DELETE FROM checklist_items WHERE card_id = ? AND copy = 'working'", (card_id,))
-            conn.execute("DELETE FROM checklists WHERE card_id = ? AND copy = 'working'", (card_id,))
+            conn.execute(
+                "DELETE FROM checklist_items WHERE card_id = ? AND copy = 'working'", (card_id,)
+            )
+            conn.execute(
+                "DELETE FROM checklists WHERE card_id = ? AND copy = 'working'", (card_id,)
+            )
 
     # Update card_timestamps for this card
     state = SyncState.load(cache_dir)

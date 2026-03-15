@@ -5,12 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
-from trache.cache.diff import compute_diff
-from trache.cache.db import read_card, resolve_card_id, write_card, write_checklists_raw
-from trache.cache.models import Card, TrelloList
-
 from conftest import seed_board
+
+from trache.cache.db import read_card, resolve_card_id, write_card, write_checklists_raw
+from trache.cache.diff import compute_diff
+from trache.cache.models import Card, TrelloList
 from trache.cache.working import (
     add_checklist_item,
     archive_card,

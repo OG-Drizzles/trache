@@ -5,9 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
+from trache.cache.db import write_card, write_labels_raw
 from trache.cache.diff import compute_diff
 from trache.cache.models import Card
-from trache.cache.db import write_card, write_labels_raw
 from trache.config import TracheConfig, ensure_cache_structure
 from trache.sync.push import _resolve_label_ids, push_changes
 

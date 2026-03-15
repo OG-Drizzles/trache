@@ -11,7 +11,6 @@ import pytest
 from trache.cache.db import (
     DB_FILENAME,
     MIGRATION_SENTINEL,
-    _db_path,
     add_list,
     connect,
     delete_card,
@@ -400,7 +399,9 @@ class TestMigration:
         from trache.cache.store import card_to_markdown
 
         # Create directory structure
-        for sub in ("clean/cards", "clean/checklists", "working/cards", "working/checklists", "indexes"):
+        for sub in (
+            "clean/cards", "clean/checklists", "working/cards", "working/checklists", "indexes"
+        ):
             (d / sub).mkdir(parents=True, exist_ok=True)
 
         # Write a card

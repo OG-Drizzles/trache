@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Optional
-
-import os
 
 import httpx
 import typer
@@ -68,7 +67,9 @@ def init(
     board_url: str = typer.Option(None, "--board-url", "-u", help="Trello board URL"),
     auth: bool = typer.Option(False, "--auth", help="Print auth/token setup guidance"),
     name: Optional[str] = typer.Option(None, "--name", "-n", help="Short alias for this board"),
-    new: Optional[str] = typer.Option(None, "--new", help="Create a new Trello board with this name"),
+    new: Optional[str] = typer.Option(
+        None, "--new", help="Create a new Trello board with this name"
+    ),
 ) -> None:
     """Initialise Trache cache for a board."""
     from trache.config import TracheConfig, ensure_cache_structure
@@ -90,7 +91,9 @@ def init(
     # Handle --new: create board on Trello
     if new:
         if not auth_configured:
-            out.error("Auth must be configured to create a board. Set TRELLO_API_KEY and TRELLO_TOKEN.")
+            out.error(
+                "Auth must be configured to create a board. Set TRELLO_API_KEY and TRELLO_TOKEN."
+            )
             raise typer.Exit(1)
 
         from trache.api.auth import TrelloAuth
@@ -133,7 +136,8 @@ def init(
     if not new:
         if not auth_configured:
             out.human(
-                "[yellow]Auth not configured — skipping board name fetch and token validation.[/yellow]"
+                "[yellow]Auth not configured — skipping board name fetch"
+                " and token validation.[/yellow]"
             )
         else:
             from trache.api.auth import TrelloAuth
@@ -243,14 +247,19 @@ def pull(
                     else:
                         display_name = list_name
                     out.human(
-                        f'[green]Pulled {len(cards)} cards from list "{escape(display_name)}"[/green]'
+                        f'[green]Pulled {len(cards)} cards from list'
+                        f' "{escape(display_name)}"[/green]'
                     )
                 else:
                     from trache.cache.db import resolve_list_name as _rln
                     out.json({
                         "cards": len(cards),
                         "card_summaries": [
-                            {"uid6": c.uid6, "title": c.title, "list_name": _rln(c.list_id, cache_dir)}
+                            {
+                                "uid6": c.uid6,
+                                "title": c.title,
+                                "list_name": _rln(c.list_id, cache_dir),
+                            }
                             for c in cards
                         ],
                     })
@@ -600,7 +609,7 @@ def version() -> None:
     if out.is_human:
         out.human(f"trache {__version__}")
     else:
-        out.tsv([[f"trache", __version__]], header=["name", "version"])
+        out.tsv([["trache", __version__]], header=["name", "version"])
 
 
 if __name__ == "__main__":
