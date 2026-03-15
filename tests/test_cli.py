@@ -17,12 +17,19 @@ runner = CliRunner()
 
 
 def _setup_cli_cache(tmp_path: Path, monkeypatch) -> Path:
-    """Set up a full .trache/ directory for CLI tests and chdir into tmp_path."""
+    """Set up a full .trache/ directory for CLI tests and chdir into tmp_path.
+
+    Uses multi-board layout: .trache/boards/test/...
+    """
     monkeypatch.chdir(tmp_path)
-    cache_dir = tmp_path / ".trache"
+    trache_root = tmp_path / ".trache"
+    trache_root.mkdir(exist_ok=True)
+    cache_dir = trache_root / "boards" / "test"
     ensure_cache_structure(cache_dir)
     config = TracheConfig(board_id="board1")
     config.save(cache_dir)
+    # Set active board
+    (trache_root / "active").write_text("test\n")
 
     card = Card(
         id="67abc123def4567890fedcba",
@@ -65,7 +72,12 @@ class TestInit:
         result = runner.invoke(app, ["init", "--board-id", "abc123def456789012345678"])
         assert result.exit_code == 0 or "Could not fetch board name" in result.output
         assert (tmp_path / ".trache").exists()
-        assert (tmp_path / ".trache" / "config.json").exists()
+        assert (tmp_path / ".trache" / "boards").exists()
+        # Config should exist under boards/<alias>/
+        boards_dir = tmp_path / ".trache" / "boards"
+        aliases = [d.name for d in boards_dir.iterdir() if d.is_dir()]
+        assert len(aliases) == 1
+        assert (boards_dir / aliases[0] / "config.json").exists()
 
 
 class TestVersion:
@@ -378,7 +390,7 @@ class TestCardCreateTempMarker:
         assert result.exit_code == 0
 
         # Find the newly created card file in working/cards
-        working_cards = tmp_path / ".trache" / "working" / "cards"
+        working_cards = tmp_path / ".trache" / "boards" / "test" / "working" / "cards"
         new_files = [f for f in working_cards.glob("*.md") if "new_" in f.stem]
         assert len(new_files) == 1
         # The filename stem is the card ID; uid6 = stem[-6:].upper()

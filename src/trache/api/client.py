@@ -76,6 +76,15 @@ class TrelloClient:
             date_last_activity=_parse_trello_date(data.get("dateLastActivity")),
         )
 
+    def create_board(self, name: str, default_lists: bool = False) -> Board:
+        """Create a new Trello board."""
+        data = self._post("/boards", {"name": name, "defaultLists": default_lists})
+        return Board(id=data["id"], name=data["name"], url=data.get("url", ""))
+
+    def close_board(self, board_id: str) -> None:
+        """Archive (close) a board on Trello."""
+        self._put(f"/boards/{board_id}", {"closed": True})
+
     def get_board_lists(self, board_id: str) -> list[TrelloList]:
         data = self._get(f"/boards/{board_id}/lists", {"filter": "open"})
         return [

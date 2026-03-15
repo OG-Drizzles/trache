@@ -16,7 +16,8 @@ console = Console()
 
 
 def _cache_dir() -> Path:
-    return Path(".trache")
+    from trache.cli._context import resolve_cache_dir
+    return resolve_cache_dir()
 
 
 def _get_client_and_config():
@@ -25,7 +26,7 @@ def _get_client_and_config():
     from trache.api.client import TrelloClient
     from trache.config import TracheConfig
 
-    config = TracheConfig.load()
+    config = TracheConfig.load(_cache_dir())
     auth = TrelloAuth.from_env(config.api_key_env, config.token_env)
     return TrelloClient(auth), config
 

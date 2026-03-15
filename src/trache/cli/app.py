@@ -13,6 +13,15 @@ from rich.console import Console
 from rich.markup import escape
 
 from trache import __version__
+from trache.cli._context import (
+    TRACHE_ROOT,
+    list_board_names,
+    resolve_cache_dir,
+    set_active_board,
+    set_board_override,
+    slugify,
+)
+from trache.cli.board import board_app
 from trache.cli.card import card_app
 from trache.cli.checklist import checklist_app
 from trache.cli.comment import comment_app
@@ -24,6 +33,7 @@ app = typer.Typer(
     help="Local-first Trello cache with Git-style sync, optimised for AI-agent workflows.",
     no_args_is_help=True,
 )
+app.add_typer(board_app, name="board", help="Board management")
 app.add_typer(card_app, name="card", help="Card operations")
 app.add_typer(checklist_app, name="checklist", help="Checklist operations")
 app.add_typer(comment_app, name="comment", help="Comment operations")
@@ -33,13 +43,23 @@ app.add_typer(list_app, name="list", help="List operations")
 console = Console()
 
 
-def _get_client():
+@app.callback()
+def main(
+    board: Optional[str] = typer.Option(
+        None, "--board", "-B", help="Board alias to operate on"
+    ),
+) -> None:
+    """Local-first Trello cache with Git-style sync."""
+    set_board_override(board)
+
+
+def _get_client(cache_dir: Path):
     """Create an authenticated Trello client from config."""
     from trache.api.auth import TrelloAuth
     from trache.api.client import TrelloClient
     from trache.config import TracheConfig
 
-    config = TracheConfig.load()
+    config = TracheConfig.load(cache_dir)
     auth = TrelloAuth.from_env(config.api_key_env, config.token_env)
     return TrelloClient(auth), config
 
@@ -49,11 +69,42 @@ def init(
     board_id: str = typer.Option(None, "--board-id", "-b", help="Trello board ID"),
     board_url: str = typer.Option(None, "--board-url", "-u", help="Trello board URL"),
     auth: bool = typer.Option(False, "--auth", help="Print auth/token setup guidance"),
+    name: Optional[str] = typer.Option(None, "--name", "-n", help="Short alias for this board"),
+    new: Optional[str] = typer.Option(None, "--new", help="Create a new Trello board with this name"),
 ) -> None:
     """Initialise Trache cache for a board."""
     from trache.config import TracheConfig, ensure_cache_structure
 
-    if not board_id and not board_url:
+    # --new and --board-id/--board-url are mutually exclusive
+    if new and (board_id or board_url):
+        console.print("[red]Cannot use --new with --board-id or --board-url[/red]")
+        raise typer.Exit(1)
+
+    config = TracheConfig(board_id=board_id or "pending")
+
+    # Detect auth state from env vars
+    api_key_val = os.environ.get(config.api_key_env)
+    token_val = os.environ.get(config.token_env)
+    auth_configured = bool(api_key_val and token_val)
+
+    # Handle --new: create board on Trello
+    if new:
+        if not auth_configured:
+            console.print("[red]Auth must be configured to create a board. Set TRELLO_API_KEY and TRELLO_TOKEN.[/red]")
+            raise typer.Exit(1)
+
+        from trache.api.auth import TrelloAuth
+        from trache.api.client import TrelloClient
+
+        auth_obj = TrelloAuth.from_env(config.api_key_env, config.token_env)
+        with TrelloClient(auth_obj) as client:
+            board_obj = client.create_board(new)
+            board_id = board_obj.id
+            config.board_id = board_id
+            config.board_name = board_obj.name
+            console.print(f"[green]Created board: {board_obj.name} on Trello[/green]")
+
+    if not board_id and not board_url and not new:
         board_id = typer.prompt("Board ID")
 
     if board_url and not board_id:
@@ -66,16 +117,8 @@ def init(
             console.print("[red]Could not extract board ID from URL[/red]")
             raise typer.Exit(1)
 
-    cache_dir = Path(".trache")
-    if cache_dir.exists():
-        console.print("[yellow].trache/ already exists. Re-initialising config.[/yellow]")
-
-    config = TracheConfig(board_id=board_id)
-
-    # Detect auth state from env vars
-    api_key_val = os.environ.get(config.api_key_env)
-    token_val = os.environ.get(config.token_env)
-    auth_configured = bool(api_key_val and token_val)
+    if board_id:
+        config.board_id = board_id
 
     # Show auth guidance if --auth flag or auth not configured
     from trache.cli.agents import print_auth_guidance
@@ -87,41 +130,69 @@ def init(
             token_env=config.token_env,
         )
 
-    # Token validation and board name fetch
-    if not auth_configured:
+    # Token validation and board name fetch (skip if --new already did this)
+    if not new:
+        if not auth_configured:
+            console.print(
+                "[yellow]Auth not configured — skipping board name fetch and token validation.[/yellow]"
+            )
+        else:
+            from trache.api.auth import TrelloAuth
+            from trache.api.client import TrelloClient
+
+            auth_obj = TrelloAuth.from_env(config.api_key_env, config.token_env)
+            with TrelloClient(auth_obj) as client:
+                # Validate token
+                try:
+                    member = client.get_current_member()
+                    member_name = member.get("fullName") or member.get("username", "unknown")
+                    console.print(f"[green]Token valid — authenticated as {member_name}[/green]")
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 401:
+                        console.print("[red]Token validation failed (401 Unauthorized)[/red]")
+                    else:
+                        raise
+
+                # Fetch board name (best-effort)
+                try:
+                    board_obj = client.get_board(config.board_id)
+                    config.board_name = board_obj.name
+                    console.print(f"Board: [bold]{board_obj.name}[/bold]")
+                except Exception:
+                    console.print(
+                        "[yellow]Could not fetch board name[/yellow]"
+                    )
+
+    # Determine alias
+    alias = name
+    if not alias:
+        alias = slugify(config.board_name) if config.board_name else slugify(config.board_id[:12])
+
+    # Check for alias collision
+    existing = list_board_names()
+    if alias in existing:
         console.print(
-            "[yellow]Auth not configured — skipping board name fetch and token validation.[/yellow]"
+            f"[red]Board alias '{alias}' already exists. Use --name to choose a different alias.[/red]"
         )
-    else:
-        from trache.api.auth import TrelloAuth
-        from trache.api.client import TrelloClient
+        raise typer.Exit(1)
 
-        auth_obj = TrelloAuth.from_env(config.api_key_env, config.token_env)
-        with TrelloClient(auth_obj) as client:
-            # Validate token
-            try:
-                member = client.get_current_member()
-                name = member.get("fullName") or member.get("username", "unknown")
-                console.print(f"[green]Token valid — authenticated as {name}[/green]")
-            except httpx.HTTPStatusError as e:
-                if e.response.status_code == 401:
-                    console.print("[red]Token validation failed (401 Unauthorized)[/red]")
-                else:
-                    raise
-
-            # Fetch board name (best-effort)
-            try:
-                board = client.get_board(board_id)
-                config.board_name = board.name
-                console.print(f"Board: [bold]{board.name}[/bold]")
-            except Exception:
-                console.print(
-                    "[yellow]Could not fetch board name[/yellow]"
-                )
+    # Create multi-board directory structure
+    TRACHE_ROOT.mkdir(parents=True, exist_ok=True)
+    boards_dir = TRACHE_ROOT / "boards"
+    boards_dir.mkdir(exist_ok=True)
+    cache_dir = boards_dir / alias
 
     ensure_cache_structure(cache_dir)
     config.save(cache_dir)
-    console.print(f"[green]Initialised .trache/ for board {board_id}[/green]")
+
+    # Set active if first board or no active board
+    active_file = TRACHE_ROOT / "active"
+    if not active_file.exists() or not active_file.read_text().strip():
+        set_active_board(alias)
+    elif len(list_board_names()) == 1:
+        set_active_board(alias)
+
+    console.print(f"[green]Initialised board '{alias}' for {config.board_id}[/green]")
 
     from trache.cli.agents import print_init_agent_guidance
 
@@ -139,8 +210,8 @@ def pull(
     """Pull data from Trello into local cache."""
     from trache.sync.pull import pull_card, pull_full_board, pull_list
 
-    client, config = _get_client()
-    cache_dir = Path(".trache")
+    cache_dir = resolve_cache_dir()
+    client, config = _get_client(cache_dir)
 
     try:
         with client:
@@ -183,7 +254,11 @@ def status() -> None:
     """Show dirty state summary (modified/added/deleted)."""
     from trache.cache.diff import compute_diff
 
-    cache_dir = Path(".trache")
+    try:
+        cache_dir = resolve_cache_dir()
+    except FileNotFoundError:
+        console.print("Clean — no local changes.")
+        return
     changeset = compute_diff(cache_dir)
 
     if changeset.is_empty:
@@ -225,7 +300,7 @@ def diff() -> None:
     """Show detailed diff between clean and working copy."""
     from trache.cache.diff import compute_diff, format_diff
 
-    cache_dir = Path(".trache")
+    cache_dir = resolve_cache_dir()
     changeset = compute_diff(cache_dir)
     console.print(format_diff(changeset))
 
@@ -240,8 +315,8 @@ def push(
     """Push local changes to Trello."""
     from trache.sync.push import push_changes
 
-    client, config = _get_client()
-    cache_dir = Path(".trache")
+    cache_dir = resolve_cache_dir()
+    client, config = _get_client(cache_dir)
 
     def _progress(current: int, total: int, desc: str) -> None:
         console.print(f"[dim]  [{current}/{total}] {desc}[/dim]")
@@ -296,8 +371,8 @@ def sync(
     from trache.sync.pull import pull_card, pull_full_board
     from trache.sync.push import push_changes
 
-    client, config = _get_client()
-    cache_dir = Path(".trache")
+    cache_dir = resolve_cache_dir()
+    client, config = _get_client(cache_dir)
 
     with client:
         # Push first
@@ -352,7 +427,8 @@ def agents(
         try:
             from trache.config import TracheConfig
 
-            cfg = TracheConfig.load()
+            cache_dir = resolve_cache_dir()
+            cfg = TracheConfig.load(cache_dir)
             board_name = getattr(cfg, "board_name", None)
         except Exception:
             pass

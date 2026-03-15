@@ -14,7 +14,8 @@ console = Console()
 
 
 def _cache_dir() -> Path:
-    return Path(".trache")
+    from trache.cli._context import resolve_cache_dir
+    return resolve_cache_dir()
 
 
 @comment_app.command("add")
@@ -32,7 +33,7 @@ def add(
     cache_dir = _cache_dir()
     card_id = resolve_card_id(card_identifier, cache_dir / "indexes")
 
-    config = TracheConfig.load()
+    config = TracheConfig.load(cache_dir)
     auth = TrelloAuth.from_env(config.api_key_env, config.token_env)
     with TrelloClient(auth) as client:
         comment = client.add_comment(card_id, text)
@@ -55,7 +56,7 @@ def edit(
     cache_dir = _cache_dir()
     card_id = resolve_card_id(card_identifier, cache_dir / "indexes")
 
-    config = TracheConfig.load()
+    config = TracheConfig.load(cache_dir)
     auth = TrelloAuth.from_env(config.api_key_env, config.token_env)
     with TrelloClient(auth) as client:
         comment = client.update_comment(card_id, comment_id, text)
@@ -84,7 +85,7 @@ def delete(
     cache_dir = _cache_dir()
     card_id = resolve_card_id(card_identifier, cache_dir / "indexes")
 
-    config = TracheConfig.load()
+    config = TracheConfig.load(cache_dir)
     auth = TrelloAuth.from_env(config.api_key_env, config.token_env)
     with TrelloClient(auth) as client:
         client.delete_comment(card_id, comment_id)
@@ -106,7 +107,7 @@ def list_comments(
     cache_dir = _cache_dir()
     card_id = resolve_card_id(card_identifier, cache_dir / "indexes")
 
-    config = TracheConfig.load()
+    config = TracheConfig.load(cache_dir)
     auth = TrelloAuth.from_env(config.api_key_env, config.token_env)
     with TrelloClient(auth) as client:
         comments = client.get_card_comments(card_id)

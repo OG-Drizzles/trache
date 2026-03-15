@@ -16,7 +16,8 @@ console = Console()
 
 
 def _cache_dir() -> Path:
-    return Path(".trache")
+    from trache.cli._context import resolve_cache_dir
+    return resolve_cache_dir()
 
 
 def _labels_path() -> Path:

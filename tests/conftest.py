@@ -13,11 +13,15 @@ from trache.config import TracheConfig, ensure_cache_structure
 
 @pytest.fixture
 def cache_dir(tmp_path: Path) -> Path:
-    """Create a temporary cache directory with full structure."""
-    d = tmp_path / ".trache"
+    """Create a temporary cache directory with full multi-board structure."""
+    trache_root = tmp_path / ".trache"
+    trache_root.mkdir()
+    d = trache_root / "boards" / "test"
     ensure_cache_structure(d)
     config = TracheConfig(board_id="abc123def456789012345678", board_name="Test Board")
     config.save(d)
+    # Set active board
+    (trache_root / "active").write_text("test\n")
     return d
 
 

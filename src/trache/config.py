@@ -7,7 +7,9 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-DEFAULT_CACHE_DIR = ".trache"
+TRACHE_ROOT = ".trache"
+# Backwards compat alias
+DEFAULT_CACHE_DIR = TRACHE_ROOT
 
 
 class TracheConfig(BaseModel):
@@ -57,13 +59,6 @@ class SyncState(BaseModel):
         path.write_text(self.model_dump_json(indent=2) + "\n")
         return path
 
-
-def get_cache_dir() -> Path:
-    """Get the cache directory path, raising if not initialised."""
-    path = Path(DEFAULT_CACHE_DIR)
-    if not path.exists():
-        raise FileNotFoundError("No .trache/ directory found. Run 'trache init' first.")
-    return path
 
 
 def ensure_cache_structure(cache_dir: Path) -> None:

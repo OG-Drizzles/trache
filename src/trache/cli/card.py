@@ -17,7 +17,8 @@ console = Console()
 
 
 def _cache_dir() -> Path:
-    return Path(".trache")
+    from trache.cli._context import resolve_cache_dir
+    return resolve_cache_dir()
 
 
 @card_app.command("list")
@@ -185,8 +186,9 @@ def create(
     from trache.cache.working import create_card
     from trache.config import TracheConfig
 
-    config = TracheConfig.load()
-    card = create_card(list_target, title, _cache_dir(), config.board_id, desc)
+    cache_dir = _cache_dir()
+    config = TracheConfig.load(cache_dir)
+    card = create_card(list_target, title, cache_dir, config.board_id, desc)
     console.print(f"[green]Created: {escape(card.title)} [{card.uid6}] (local only — push to sync)[/green]")
 
 
