@@ -1,5 +1,79 @@
 # Changelog
 
+## 0.3.0 — 2026-03-15
+
+Major release: SQLite storage backend, machine-first output layer, batch operations, staleness checks, and three rounds of audit remediation.
+
+### Breaking Changes
+
+- **Storage backend**: file-based `clean/`, `working/`, `indexes/` directories replaced by a single `cache.db` SQLite database with WAL mode. Existing file-based caches are auto-migrated on first command (two-phase sentinel-guarded migration with crash recovery).
+- **File layout**: `.trache/boards/<alias>/` now contains `config.json`, `cache.db`, and `state.json` only. Old directories are removed after migration.
+- **Machine-first output**: default output is now TSV/JSON (set `TRACHE_HUMAN=1` for Rich-formatted human output). Commands that previously used `--raw` now emit machine output by default.
+
+### Storage Layer
+
+- **SQLite persistence** (`cache/db.py`): cards, checklists, labels, and lists stored in a single WAL-mode database with `(id, copy)` composite keys for clean/working separation
+- **Atomic full-board write**: `write_full_snapshot()` replaces all data in one transaction
+- **Atomic card-pull write**: `write_card_pull()` writes card + checklists to both clean and working in a single transaction, eliminating crash-divergence risk (F-001/F-002)
+- **Index compatibility shim** (`cache/index.py`): thin facade delegates to `db.py` for backward compatibility during migration; CLI modules progressively migrated to direct `db.py` calls (F-004/F-005)
+
+### Machine-First Output
+
+- **Dual-mode output layer** (`_output.py`): `OutputWriter` emits TSV/JSON to stdout in machine mode, Rich-formatted text in human mode; errors go to stderr as JSON in machine mode
+- **`OutputWriter.error(**extra)`**: structured error payloads with arbitrary extra fields (e.g., `available_boards` on board switch failure)
+- **API stats on stderr**: machine mode emits `{"api_calls":N,"api_ms":M}` to stderr for AI observability
+- **`trache init`**: machine mode returns JSON with `install_block` field (raw text for CLAUDE.md); Rich agent guidance panels gated behind `is_human`
+- **`trache sync`**: machine mode returns `{"ok", "dry_run", "push", "pull"}` with full push result and pull summaries including `card_summaries` and `list_summaries`
+- **`trache push`**: machine output via shared `_serialise_push_result()` helper (also used by `sync`)
+- **`trache card show`**: JSON includes `list_name`, `due`, and `checklists` fields
+- **`trache card edit-desc`**: JSON includes updated `description`
+- **`trache card create`**: JSON includes `list_id`
+- **`trache card move`**: JSON includes both `list_id` and `list_name`
+- **`trache pull --card` / `sync --card`**: JSON includes full card data (`labels`, `due`, `closed`, `list_name`, `checklists`) — eliminates follow-up `card show`
+- **`trache pull --list`**: card summaries use resolved `list_name`
+- **`trache label delete`**: JSON includes `affected_cards` and `affected_count`
+- **`trache label list`**: includes label `id` column; no longer silently drops unnamed labels
+- **`trache list archive`**: JSON includes list `name`
+- **`trache board offboard`**: JSON includes `archived_on_trello` and `new_active_board`
+- **`trache board switch`**: error includes `available_boards` in machine stderr JSON
+- **`trache status`**: empty-state fast-path JSON includes `label_changes` key (matches normal shape)
+- **Empty-state output**: `board list` and `list show` emit proper empty output in machine mode instead of silence/exit(1)
+
+### New Commands
+
+- **`trache stale`**: one cheap API call to check if the board has remote changes since last pull; returns `{"stale", "local_activity", "remote_activity"}`
+- **`trache batch run`**: execute multiple local-first commands from stdin (one per line); returns JSON array of results; supports `card` and `checklist` subcommands
+
+### Batch Operations
+
+- Dispatch table for `card edit-title`, `card edit-desc`, `card move`, `card create`, `card archive`, `card add-label`, `card remove-label`, `checklist check`, `checklist uncheck`, `checklist add-item`, `checklist remove-item`
+- Batch handlers aligned with CLI equivalents: `edit-desc` returns `description`, `move` returns `list_id`/`list_name`, `create` returns `list_id`
+- Error isolation: individual command failures don't halt the batch; each result includes `ok` and `error` fields
+
+### Shared Checklist Mutations (F-006)
+
+- **Extracted to `working.py`**: `check_checklist_item()`, `uncheck_checklist_item()`, `add_checklist_item()`, `remove_checklist_item()` with idempotency guards
+- `checklist.py` and `batch.py` both delegate to shared functions instead of duplicating logic
+- All raise `KeyError` on not-found (matches `handle_resolve_errors` in CLI layer)
+
+### API Efficiency
+
+- **`pull_list` batch checklists**: single `get_board_checklists()` call replaces N per-card `get_card_checklists()` fetches
+
+### Facade Migration
+
+- **`comment.py`**: migrated 4 sites from `trache.cache.index.resolve_card_id` to `trache.cache.db.resolve_card_id` (F-004)
+- **`list_cmd.py`**: migrated all `trache.cache.index` imports to direct `trache.cache.db` calls (F-005)
+
+### Documentation
+
+- **CLAUDE.md**: updated file layout to reflect SQLite/multi-board structure; added `trache stale` and `trache batch run` to command reference
+
+### Tests
+
+- 250 tests (up from 189): new suites for `write_card_pull` atomicity, shared checklist mutations (idempotent check/uncheck, not-found errors, add/remove), pull clean/working consistency, sync machine output, init machine output
+- Removed 2 dead skipped tests for file-based code paths superseded by SQLite
+
 ## 0.2.3 — 2026-03-15
 
 Audit v2 remediation. Addresses 8 findings (F-001–F-008) and 6 opportunities (O-001–O-006) from the post-remediation audit.
