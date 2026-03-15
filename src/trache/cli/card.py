@@ -137,8 +137,9 @@ def edit_title(
     """Edit card title in working copy."""
     from trache.cache.working import edit_title as _edit_title
 
-    guard_archived(identifier, _cache_dir(), force=force)
-    card = _edit_title(identifier, title, _cache_dir())
+    cache_dir = _cache_dir()
+    guard_archived(identifier, cache_dir, force=force)
+    card = _edit_title(identifier, title, cache_dir)
     console.print(f"[green]Title updated: {escape(card.title)} [{card.uid6}][/green]")
 
 
@@ -152,8 +153,9 @@ def edit_desc(
     """Edit card description in working copy."""
     from trache.cache.working import edit_description
 
-    guard_archived(identifier, _cache_dir(), force=force)
-    card = edit_description(identifier, desc, _cache_dir())
+    cache_dir = _cache_dir()
+    guard_archived(identifier, cache_dir, force=force)
+    card = edit_description(identifier, desc, cache_dir)
     console.print(f"[green]Description updated: {escape(card.title)} [{card.uid6}][/green]")
 
 
@@ -216,8 +218,9 @@ def add_label_cmd(
     """Add a label to a card in working copy."""
     from trache.cache.working import add_label
 
-    guard_archived(identifier, _cache_dir(), force=force)
-    card, added = add_label(identifier, label, _cache_dir())
+    cache_dir = _cache_dir()
+    guard_archived(identifier, cache_dir, force=force)
+    card, added = add_label(identifier, label, cache_dir)
     if added:
         console.print(f"[green]Label '{escape(label)}' added to {escape(card.title)} [{card.uid6}][/green]")
     else:
@@ -234,9 +237,10 @@ def remove_label_cmd(
     """Remove a label from a card in working copy."""
     from trache.cache.working import remove_label
 
-    guard_archived(identifier, _cache_dir(), force=force)
+    cache_dir = _cache_dir()
+    guard_archived(identifier, cache_dir, force=force)
     try:
-        card = remove_label(identifier, label, _cache_dir())
+        card = remove_label(identifier, label, cache_dir)
         console.print(
             f"[green]Label '{escape(label)}' removed from {escape(card.title)} [{card.uid6}][/green]"
         )

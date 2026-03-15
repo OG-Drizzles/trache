@@ -10,7 +10,7 @@ Multi-board support and board lifecycle commands.
 - **`--board` / `-B` global flag**: route any command to a specific board without switching active board
 - **`trache board list`**: show all configured boards with alias, Trello name, and last pull timestamp; marks active board with `*`
 - **`trache board switch <alias>`**: switch the active board
-- **`trache board destroy <alias>`**: remove a board's local cache with `--yes` safety flag, `--force` to override dirty guard, `--archive` to close the board on Trello
+- **`trache board offboard <alias>`**: remove a board's local cache with `--yes` safety flag, `--force` to override dirty guard, `--archive` to close the board on Trello
 - **`trache init --name <alias>`**: choose a short alias for the board at init time
 - **`trache init --new "Board Name"`**: create a new Trello board on Trello and init locally in one step
 - **Auto-generated aliases**: board names are slugified (`"My Work Board"` → `"my-work-board"`)

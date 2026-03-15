@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
+import httpx
 from rich.console import Console
 
 from trache.api.client import TrelloClient
@@ -193,8 +194,10 @@ def _check_remote_conflict(
                     f"since last pull. Local changes will overwrite remote. "
                     f"Pull first to see remote changes.[/yellow]"
                 )
-    except Exception:
-        pass  # Network error — don't block push for a warning
+    except httpx.HTTPError:
+        pass  # Network issue — don't block push
+    except Exception as e:
+        _console.print(f"[yellow]Warning: conflict check failed unexpectedly: {e}[/yellow]")
 
 
 def _push_modified_card(

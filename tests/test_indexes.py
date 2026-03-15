@@ -111,6 +111,29 @@ class TestIncrementalIndex:
         assert sample_card.uid6 in by_uid6
         assert by_uid6[sample_card.uid6] == sample_card.id
 
+    def test_add_card_removes_from_old_list(self, sample_card: Card, cache_dir: Path) -> None:
+        """Moving a card between lists should remove it from the old list."""
+        index_dir = cache_dir / "indexes"
+        build_card_indexes([sample_card], index_dir)
+
+        old_list_id = sample_card.list_id
+        new_list_id = "345678901bcdef1234567890"
+
+        # Move card to a different list
+        moved_card = Card(
+            id=sample_card.id,
+            board_id=sample_card.board_id,
+            list_id=new_list_id,
+            title=sample_card.title,
+        )
+        add_card_to_index(moved_card, index_dir)
+
+        by_list = load_index(index_dir, "cards_by_list")
+        # Card should NOT be in old list
+        assert sample_card.id not in by_list.get(old_list_id, [])
+        # Card should be in new list
+        assert sample_card.id in by_list[new_list_id]
+
     def test_remove_card_from_index(self, sample_card: Card, cache_dir: Path) -> None:
         index_dir = cache_dir / "indexes"
         build_card_indexes([sample_card], index_dir)

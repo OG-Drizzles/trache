@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import random
+import time
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Callable, Optional, TypeVar
 
 import httpx
 
@@ -19,6 +21,37 @@ from trache.cache.models import (
 )
 
 BASE_URL = "https://api.trello.com/1"
+
+T = TypeVar("T")
+
+_MAX_RETRIES = 3
+_BASE_DELAY = 1.0
+
+
+def _retry(fn: Callable[[], T]) -> T:
+    """Retry with exponential backoff + jitter on transient errors.
+
+    Retries on 429, 5xx HTTP status codes, and transport errors.
+    Max 3 attempts, 1s base delay with jitter.
+    """
+    last_exc: BaseException | None = None
+    for attempt in range(_MAX_RETRIES):
+        try:
+            return fn()
+        except httpx.HTTPStatusError as e:
+            status = e.response.status_code
+            if status == 429 or status >= 500:
+                last_exc = e
+            else:
+                raise
+        except httpx.TransportError as e:
+            last_exc = e
+
+        if attempt < _MAX_RETRIES - 1:
+            delay = _BASE_DELAY * (2 ** attempt) + random.uniform(0, 0.5)
+            time.sleep(delay)
+
+    raise last_exc  # type: ignore[misc]
 
 
 class TrelloClient:
@@ -39,25 +72,40 @@ class TrelloClient:
 
     def _get(self, path: str, params: Optional[dict] = None) -> Any:
         all_params = {**(params or {}), **self._auth.query_params}
-        resp = self._client.get(path, params=all_params)
-        resp.raise_for_status()
-        return resp.json()
+
+        def _do() -> Any:
+            resp = self._client.get(path, params=all_params)
+            resp.raise_for_status()
+            return resp.json()
+
+        return _retry(_do)
 
     def _put(self, path: str, data: Optional[dict] = None) -> Any:
         params = self._auth.query_params
-        resp = self._client.put(path, params=params, json=data or {})
-        resp.raise_for_status()
-        return resp.json()
+
+        def _do() -> Any:
+            resp = self._client.put(path, params=params, json=data or {})
+            resp.raise_for_status()
+            return resp.json()
+
+        return _retry(_do)
 
     def _post(self, path: str, data: Optional[dict] = None) -> Any:
         params = self._auth.query_params
-        resp = self._client.post(path, params=params, json=data or {})
-        resp.raise_for_status()
-        return resp.json()
+
+        def _do() -> Any:
+            resp = self._client.post(path, params=params, json=data or {})
+            resp.raise_for_status()
+            return resp.json()
+
+        return _retry(_do)
 
     def _delete(self, path: str) -> None:
-        resp = self._client.delete(path, params=self._auth.query_params)
-        resp.raise_for_status()
+        def _do() -> None:
+            resp = self._client.delete(path, params=self._auth.query_params)
+            resp.raise_for_status()
+
+        _retry(_do)
 
     # --- Member ---
 

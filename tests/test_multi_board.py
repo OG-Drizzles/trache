@@ -190,17 +190,17 @@ class TestBoardSwitch:
         assert "not found" in result.output
 
 
-# --- board destroy command ---
+# --- board offboard command ---
 
 
-class TestBoardDestroy:
-    def test_destroy_without_yes(self, tmp_path: Path, monkeypatch) -> None:
+class TestBoardOffboard:
+    def test_offboard_without_yes(self, tmp_path: Path, monkeypatch) -> None:
         _setup_multi_board(tmp_path, monkeypatch)
-        result = runner.invoke(app, ["board", "destroy", "personal"])
+        result = runner.invoke(app, ["board", "offboard", "personal"])
         assert result.exit_code == 1
         assert "--yes" in result.output
 
-    def test_destroy_with_dirty_state_no_force(self, tmp_path: Path, monkeypatch) -> None:
+    def test_offboard_with_dirty_state_no_force(self, tmp_path: Path, monkeypatch) -> None:
         trache_root = _setup_multi_board(tmp_path, monkeypatch)
         # Create a card in working but not clean to simulate dirty state
         board_dir = trache_root / "boards" / "personal"
@@ -214,31 +214,31 @@ class TestBoardDestroy:
         write_card_file(card, board_dir / "working" / "cards")
         build_index([card], lists, board_dir / "indexes")
 
-        result = runner.invoke(app, ["board", "destroy", "personal", "--yes"])
+        result = runner.invoke(app, ["board", "offboard", "personal", "--yes"])
         assert result.exit_code == 1
         assert "unpushed" in result.output
 
-    def test_destroy_yes_force(self, tmp_path: Path, monkeypatch) -> None:
+    def test_offboard_yes_force(self, tmp_path: Path, monkeypatch) -> None:
         trache_root = _setup_multi_board(tmp_path, monkeypatch)
-        result = runner.invoke(app, ["board", "destroy", "personal", "--yes", "--force"])
+        result = runner.invoke(app, ["board", "offboard", "personal", "--yes", "--force"])
         assert result.exit_code == 0
-        assert "Destroyed" in result.output
+        assert "Offboarded" in result.output
         assert not (trache_root / "boards" / "personal").exists()
         # Active should still be "work"
         assert (trache_root / "active").read_text().strip() == "work"
 
-    def test_destroy_active_board_switches(self, tmp_path: Path, monkeypatch) -> None:
+    def test_offboard_active_board_switches(self, tmp_path: Path, monkeypatch) -> None:
         trache_root = _setup_multi_board(tmp_path, monkeypatch)
-        result = runner.invoke(app, ["board", "destroy", "work", "--yes", "--force"])
+        result = runner.invoke(app, ["board", "offboard", "work", "--yes", "--force"])
         assert result.exit_code == 0
         # Should switch to remaining board
         assert (trache_root / "active").read_text().strip() == "personal"
 
-    def test_destroy_last_board_removes_active(self, tmp_path: Path, monkeypatch) -> None:
+    def test_offboard_last_board_removes_active(self, tmp_path: Path, monkeypatch) -> None:
         trache_root = _setup_multi_board(tmp_path, monkeypatch)
         # Destroy both
-        runner.invoke(app, ["board", "destroy", "personal", "--yes", "--force"])
-        result = runner.invoke(app, ["board", "destroy", "work", "--yes", "--force"])
+        runner.invoke(app, ["board", "offboard", "personal", "--yes", "--force"])
+        result = runner.invoke(app, ["board", "offboard", "work", "--yes", "--force"])
         assert result.exit_code == 0
         active_file = trache_root / "active"
         assert not active_file.exists()

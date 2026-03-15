@@ -160,6 +160,17 @@ def _fuzzy_match(name: str) -> Optional[str]:
     return None
 
 
+def get_client_and_config(cache_dir: Path):
+    """Create an authenticated Trello client and config from a cache directory."""
+    from trache.api.auth import TrelloAuth
+    from trache.api.client import TrelloClient
+    from trache.config import TracheConfig
+
+    config = TracheConfig.load(cache_dir)
+    auth = TrelloAuth.from_env(config.api_key_env, config.token_env)
+    return TrelloClient(auth), config
+
+
 def _edit_distance_leq(a: str, b: str, threshold: int) -> bool:
     """Check if edit distance between a and b is <= threshold."""
     if abs(len(a) - len(b)) > threshold:

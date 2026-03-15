@@ -17,9 +17,8 @@ def _fmt_dt(dt: Optional[datetime]) -> Optional[str]:
     if dt.tzinfo is not None and dt.utcoffset() is not None:
         from datetime import timezone
 
-        assert dt.tzinfo == timezone.utc or dt.utcoffset().total_seconds() == 0, (
-            f"Expected UTC datetime, got tzinfo={dt.tzinfo}"
-        )
+        if dt.utcoffset().total_seconds() != 0:
+            dt = dt.astimezone(timezone.utc)
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
@@ -162,9 +161,11 @@ def _extract_description(body: str) -> str:
 
 def write_card_file(card: Card, directory: Path) -> Path:
     """Write a card to a .md file in the given directory."""
+    from trache.cache._atomic import atomic_write
+
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"{card.id}.md"
-    path.write_text(card_to_markdown(card))
+    atomic_write(path, card_to_markdown(card))
     return path
 
 

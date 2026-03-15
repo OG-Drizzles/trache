@@ -15,6 +15,7 @@ from rich.markup import escape
 from trache import __version__
 from trache.cli._context import (
     TRACHE_ROOT,
+    get_client_and_config,
     list_board_names,
     resolve_cache_dir,
     set_active_board,
@@ -55,13 +56,7 @@ def main(
 
 def _get_client(cache_dir: Path):
     """Create an authenticated Trello client from config."""
-    from trache.api.auth import TrelloAuth
-    from trache.api.client import TrelloClient
-    from trache.config import TracheConfig
-
-    config = TracheConfig.load(cache_dir)
-    auth = TrelloAuth.from_env(config.api_key_env, config.token_env)
-    return TrelloClient(auth), config
+    return get_client_and_config(cache_dir)
 
 
 @app.command()
@@ -254,6 +249,9 @@ def status() -> None:
     """Show dirty state summary (modified/added/deleted)."""
     from trache.cache.diff import compute_diff
 
+    if not TRACHE_ROOT.exists():
+        console.print("Clean — no local changes.")
+        return
     try:
         cache_dir = resolve_cache_dir()
     except FileNotFoundError:
@@ -357,6 +355,7 @@ def push(
     if result.errors:
         for err in result.errors:
             console.print(f"[red]Error: {err}[/red]")
+        console.print("[dim]Run `trache status` to see remaining dirty cards.[/dim]")
         raise typer.Exit(1)
 
 

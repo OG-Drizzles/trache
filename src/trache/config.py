@@ -31,10 +31,12 @@ class TracheConfig(BaseModel):
 
     def save(self, cache_dir: Optional[Path] = None) -> Path:
         """Save config to .trache/config.json."""
+        from trache.cache._atomic import atomic_write
+
         base = cache_dir or Path(self.cache_dir)
         base.mkdir(parents=True, exist_ok=True)
         path = base / "config.json"
-        path.write_text(self.model_dump_json(indent=2) + "\n")
+        atomic_write(path, self.model_dump_json(indent=2) + "\n")
         return path
 
 
@@ -53,10 +55,12 @@ class SyncState(BaseModel):
         return cls.model_validate_json(path.read_text())
 
     def save(self, cache_dir: Optional[Path] = None) -> Path:
+        from trache.cache._atomic import atomic_write
+
         base = cache_dir or Path(DEFAULT_CACHE_DIR)
         base.mkdir(parents=True, exist_ok=True)
         path = base / "state.json"
-        path.write_text(self.model_dump_json(indent=2) + "\n")
+        atomic_write(path, self.model_dump_json(indent=2) + "\n")
         return path
 
 

@@ -70,9 +70,6 @@ def _fields_equal(field_name: str, old_val: object, new_val: object) -> bool:
     """Typed comparison per field."""
     if field_name == "labels":
         return sorted(old_val) == sorted(new_val)
-    if field_name == "due":
-        # Both are Optional[datetime] — direct comparison
-        return old_val == new_val
     return old_val == new_val
 
 

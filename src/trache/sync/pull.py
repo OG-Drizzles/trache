@@ -10,7 +10,7 @@ from typing import Optional
 
 from trache.api.client import TrelloClient
 from trache.cache.diff import _fields_equal
-from trache.cache.index import build_card_indexes, build_index
+from trache.cache.index import add_card_to_index, build_index
 from trache.cache.models import Card, Checklist
 from trache.cache.snapshot import write_clean_snapshot
 from trache.cache.store import read_card_file, write_card_file
@@ -82,15 +82,17 @@ def pull_full_board(
         _preserve_content_modified_at(card, clean_cards_dir)
 
     # Write board metadata
+    from trache.cache._atomic import atomic_write
+
     board_meta = f"# {board.name}\n\n- **Board ID:** {board.id}\n- **URL:** {board.url}\n"
-    (cache_dir / "clean" / "board_meta.md").write_text(board_meta)
-    (cache_dir / "working" / "board_meta.md").write_text(board_meta)
+    atomic_write(cache_dir / "clean" / "board_meta.md", board_meta)
+    atomic_write(cache_dir / "working" / "board_meta.md", board_meta)
 
     # Write labels
     labels_data = [{"id": lb.id, "name": lb.name, "color": lb.color} for lb in labels]
     labels_json = json.dumps(labels_data, indent=2) + "\n"
-    (cache_dir / "clean" / "labels.json").write_text(labels_json)
-    (cache_dir / "working" / "labels.json").write_text(labels_json)
+    atomic_write(cache_dir / "clean" / "labels.json", labels_json)
+    atomic_write(cache_dir / "working" / "labels.json", labels_json)
 
     # Write per-card checklist files to clean/working
     _write_per_card_checklists(checklists, cache_dir)
@@ -189,11 +191,7 @@ def pull_card(
 
         remove_card_from_index(card_id, cache_dir / "indexes")
     else:
-        # Rebuild indexes (incremental would be better but full rebuild is safe)
-        from trache.cache.store import list_card_files, read_card_file
-
-        all_cards = [read_card_file(p) for p in list_card_files(cache_dir / "clean" / "cards")]
-        build_card_indexes(all_cards, cache_dir / "indexes")
+        add_card_to_index(card, cache_dir / "indexes")
 
     return card
 
@@ -216,10 +214,16 @@ def pull_list(
     list_id = resolve_list_id(list_identifier, cache_dir / "indexes")
     cards = client.get_list_cards(list_id)
 
+    # Fetch all board checklists in one call instead of N+1 per-card calls
+    card_ids = {card.id for card in cards}
+    all_checklists = client.get_board_checklists(config.board_id)
+    checklists_for_list = [cl for cl in all_checklists if cl.card_id in card_ids]
+
+    # Attach checklists to cards
+    _attach_checklists(cards, checklists_for_list)
+
     for card in cards:
         card.description = strip_block(card.description)
-        checklists = client.get_card_checklists(card.id)
-        card.checklists = checklists
 
         # Preserve content_modified_at for unchanged content
         _preserve_content_modified_at(card, cache_dir / "clean" / "cards")
@@ -227,14 +231,12 @@ def pull_list(
         write_card_file(card, cache_dir / "clean" / "cards")
         write_card_file(card, cache_dir / "working" / "cards")
 
-        # Write per-card checklist files
-        _write_per_card_checklists(checklists, cache_dir)
+    # Write per-card checklist files
+    _write_per_card_checklists(checklists_for_list, cache_dir)
 
-    # Rebuild indexes
-    from trache.cache.store import list_card_files, read_card_file
-
-    all_cards = [read_card_file(p) for p in list_card_files(cache_dir / "clean" / "cards")]
-    build_card_indexes(all_cards, cache_dir / "indexes")
+    # Incremental index update per card
+    for card in cards:
+        add_card_to_index(card, cache_dir / "indexes")
 
     return cards
 
@@ -252,8 +254,10 @@ def _write_per_card_checklists(checklists: list[Checklist], cache_dir: Path) -> 
         working_cl_dir = cache_dir / "working" / "checklists"
         clean_cl_dir.mkdir(parents=True, exist_ok=True)
         working_cl_dir.mkdir(parents=True, exist_ok=True)
-        (clean_cl_dir / f"{card_id}.json").write_text(cl_json)
-        (working_cl_dir / f"{card_id}.json").write_text(cl_json)
+        from trache.cache._atomic import atomic_write
+
+        atomic_write(clean_cl_dir / f"{card_id}.json", cl_json)
+        atomic_write(working_cl_dir / f"{card_id}.json", cl_json)
 
 
 _CONTENT_FIELDS = ("title", "description", "list_id", "labels", "due", "closed")

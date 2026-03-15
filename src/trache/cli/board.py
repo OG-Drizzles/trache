@@ -1,4 +1,4 @@
-"""Board management subcommands: list, switch, destroy."""
+"""Board management subcommands: list, switch, offboard."""
 
 from __future__ import annotations
 
@@ -83,21 +83,21 @@ def switch(
     console.print(f"[green]Switched to board: {alias}[/green]")
 
 
-@board_app.command("destroy")
-def destroy(
-    alias: str = typer.Argument(help="Board alias to destroy"),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Confirm destruction"),
+@board_app.command("offboard")
+def offboard(
+    alias: str = typer.Argument(help="Board alias to offboard"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Confirm offboarding"),
     archive: bool = typer.Option(
         False, "--archive", help="Also archive the board on Trello"
     ),
     force: bool = typer.Option(
-        False, "--force", help="Destroy even if there are unpushed changes"
+        False, "--force", help="Offboard even if there are unpushed changes"
     ),
 ) -> None:
-    """Destroy a board's local cache. Requires --yes flag."""
+    """Remove a board's local cache. Requires --yes flag."""
     if not yes:
         console.print(
-            "[red]Destroying a board removes all local data. Pass --yes to confirm.[/red]"
+            "[red]Offboarding a board removes all local data. Pass --yes to confirm.[/red]"
         )
         raise typer.Exit(1)
 
@@ -127,14 +127,11 @@ def destroy(
 
     # Archive on Trello if requested
     if archive:
-        from trache.api.auth import TrelloAuth
-        from trache.api.client import TrelloClient
-        from trache.config import TracheConfig
+        from trache.cli._context import get_client_and_config
 
         try:
-            config = TracheConfig.load(board_dir)
-            auth = TrelloAuth.from_env(config.api_key_env, config.token_env)
-            with TrelloClient(auth) as client:
+            client, config = get_client_and_config(board_dir)
+            with client:
                 client.close_board(config.board_id)
             console.print(f"[green]Archived board on Trello[/green]")
         except Exception as e:
@@ -166,4 +163,4 @@ def destroy(
             if active_file.exists():
                 active_file.unlink()
 
-    console.print(f"[green]Destroyed board: {alias}[/green]")
+    console.print(f"[green]Offboarded board: {alias}[/green]")

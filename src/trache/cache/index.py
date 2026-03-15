@@ -9,12 +9,6 @@ from trache.cache.models import Card, TrelloList
 
 INDEX_FILENAME = "index.json"
 
-# Old separate index files (for migration cleanup)
-_OLD_INDEX_FILES = [
-    "cards_by_id.json", "cards_by_uid6.json",
-    "cards_by_list.json", "lists_by_id.json",
-]
-
 
 def build_index(
     cards: list[Card], lists: list[TrelloList], index_dir: Path
@@ -46,12 +40,6 @@ def build_index(
 
     _write_json(index_dir / INDEX_FILENAME, index)
 
-    # Clean up old separate files (migration)
-    for old_file in _OLD_INDEX_FILES:
-        old_path = index_dir / old_file
-        if old_path.exists():
-            old_path.unlink()
-
 
 # Keep old entry points as aliases for backward compatibility during transition
 def build_card_indexes(cards: list[Card], index_dir: Path) -> None:
@@ -78,12 +66,6 @@ def build_card_indexes(cards: list[Card], index_dir: Path) -> None:
 
     _write_json(index_dir / INDEX_FILENAME, index)
 
-    # Clean up old separate files
-    for old_file in _OLD_INDEX_FILES:
-        old_path = index_dir / old_file
-        if old_path.exists():
-            old_path.unlink()
-
 
 def build_list_index(lists: list[TrelloList], index_dir: Path) -> None:
     """Build list index. Updates lists section of unified index."""
@@ -95,11 +77,6 @@ def build_list_index(lists: list[TrelloList], index_dir: Path) -> None:
     }
     _write_json(index_dir / INDEX_FILENAME, index)
 
-    # Clean up old file
-    old_path = index_dir / "lists_by_id.json"
-    if old_path.exists():
-        old_path.unlink()
-
 
 def _load_full_index(index_dir: Path) -> dict:
     """Load the full unified index, or initialize empty."""
@@ -107,37 +84,31 @@ def _load_full_index(index_dir: Path) -> dict:
     if path.exists():
         return json.loads(path.read_text())
 
-    # Try migrating from old separate files
-    index: dict = {
+    return {
         "cards_by_id": {},
         "cards_by_uid6": {},
         "cards_by_list": {},
         "lists_by_id": {},
     }
-    for section in index:
-        old_path = index_dir / f"{section}.json"
-        if old_path.exists():
-            index[section] = json.loads(old_path.read_text())
-    return index
 
 
 def load_index(index_dir: Path, name: str) -> dict:
     """Load a specific section of the index by name."""
     index = _load_full_index(index_dir)
-    section = index.get(name, {})
-    if section:
-        return section
-
-    # Fallback: try old separate file (backward compat on first run)
-    old_path = index_dir / f"{name}.json"
-    if old_path.exists():
-        return json.loads(old_path.read_text())
-    return {}
+    return index.get(name, {})
 
 
 def add_card_to_index(card: Card, index_dir: Path) -> None:
     """Add or update a single card in the index."""
     index = _load_full_index(index_dir)
+
+    # Remove card from old list if it moved
+    existing = index["cards_by_id"].get(card.id)
+    if existing and existing.get("list_id") != card.list_id:
+        old_list = index["cards_by_list"].get(existing["list_id"], [])
+        if card.id in old_list:
+            old_list.remove(card.id)
+
     index["cards_by_id"][card.id] = {
         "title": card.title,
         "list_id": card.list_id,
@@ -236,6 +207,13 @@ def resolve_card_id(identifier: str, index_dir: Path) -> str:
         for card_file in working_dir.glob("*.md"):
             stem = card_file.stem
             if stem == identifier or stem[-6:].upper() == upper_id:
+                import warnings
+
+                warnings.warn(
+                    f"Card '{identifier}' resolved via filesystem scan (not in index). "
+                    f"Run 'trache pull' to rebuild indexes.",
+                    stacklevel=2,
+                )
                 return stem
 
     raise KeyError(
@@ -280,4 +258,6 @@ def resolve_list_name(list_id: str, index_dir: Path) -> str:
 
 
 def _write_json(path: Path, data: dict) -> None:
-    path.write_text(json.dumps(data, indent=2, default=str) + "\n")
+    from trache.cache._atomic import atomic_write
+
+    atomic_write(path, json.dumps(data, indent=2, default=str) + "\n")
