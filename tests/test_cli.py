@@ -84,7 +84,7 @@ class TestVersion:
     def test_version(self) -> None:
         result = runner.invoke(app, ["version"])
         assert result.exit_code == 0
-        assert "0.1." in result.output
+        assert "trache " in result.output and any(v in result.output for v in ["0.1.", "0.2."])
 
 
 class TestStatus:

@@ -1,5 +1,96 @@
 # Changelog
 
+## 0.2.0 — 2026-03-15
+
+Multi-board support and board lifecycle commands.
+
+### Features
+
+- **Multi-board directory layout**: `.trache/boards/<alias>/` per board with `.trache/active` file for board selection
+- **`--board` / `-B` global flag**: route any command to a specific board without switching active board
+- **`trache board list`**: show all configured boards with alias, Trello name, and last pull timestamp; marks active board with `*`
+- **`trache board switch <alias>`**: switch the active board
+- **`trache board destroy <alias>`**: remove a board's local cache with `--yes` safety flag, `--force` to override dirty guard, `--archive` to close the board on Trello
+- **`trache init --name <alias>`**: choose a short alias for the board at init time
+- **`trache init --new "Board Name"`**: create a new Trello board on Trello and init locally in one step
+- **Auto-generated aliases**: board names are slugified (`"My Work Board"` → `"my-work-board"`)
+- **Fuzzy alias matching**: typos in `--board` flag suggest the closest known alias
+- **Automatic legacy migration**: flat `.trache/` layout is transparently migrated to multi-board on first command
+
+### API
+
+- `TrelloClient.create_board()`: create a new Trello board
+- `TrelloClient.close_board()`: archive (close) a board on Trello
+
+### Infrastructure
+
+- Central board routing in `_context.py` replaces 6 copies of `_cache_dir()` returning `Path(".trache")`
+- Removed dead `get_cache_dir()` from config module
+- 27 new tests in `test_multi_board.py` (163 total)
+
+## 0.1.10 — 2026-03-15
+
+Raw output mode, lightweight pull check, and auth onboarding.
+
+### Features
+
+- **`--raw` flag**: tab-separated output on `card list`, `card show`, `checklist show`, `label list`, and `list show` for agent/script consumption
+- **Lightweight pull check**: `pull` fetches board `dateLastActivity` before full pull; skips if unchanged
+- **Auth onboarding flow**: `trache init` now shows an Auth Setup panel with token URL when credentials are missing; `--auth` flag forces the panel even when auth is configured
+- **`GET /members/me` validation**: `init` validates the token on setup and prints the authenticated user's name
+
+### Tests
+
+- Auth panel tests for init with various env var states
+- `build_auth_url()` unit tests
+
+## 0.1.9 — 2026-03-15
+
+List management commands and targeted sync.
+
+### Features
+
+- **`trache list create <name>`**: create a new list on the board (API-direct)
+- **`trache list rename <id-or-name> <new-name>`**: rename a list (API-direct)
+- **`trache list archive <id-or-name> --yes`**: archive a list (API-direct)
+- **`trache pull --list <name>`**: pull all cards in a single list without full-board pull
+- **`trache push --card <uid6>`**: push changes for a single card
+- **`trache sync --card <uid6>`**: push then pull a single card
+
+### API
+
+- `TrelloClient.create_list()`, `rename_list()`, `archive_list()`
+- Index helpers: `add_list_to_index()`, `update_list_in_index()`, `remove_list_from_index()`
+
+### Agent Block
+
+- Reference block updated with list and targeted sync commands
+
+## 0.1.8 — 2026-03-14
+
+Push reporting, error handling, comment/checklist/label management commands.
+
+### Features
+
+- **`trache comment edit <uid6> <comment_id> <text>`**: edit a comment (API-direct)
+- **`trache comment delete <uid6> <comment_id> --yes`**: delete a comment (API-direct)
+- **`trache checklist create <uid6> <name>`**: create a new checklist on a card (local-first)
+- **`trache label create <name> [--color]`**: create a board label (local-first)
+- **`trache label delete <name>`**: delete a board label with card-usage warning (local-first)
+- **Push progress reporting**: `push` prints `[n/m] description` lines during execution
+- **`--raw` push output**: tab-separated output for script consumption
+
+### Error Handling
+
+- **Shared CLI error decorator**: `@handle_resolve_errors` catches `KeyError`, `ValueError`, `FileNotFoundError` for clean error output
+- **Archived card guard**: edit commands warn when targeting an archived card; `--force` flag to proceed
+- **Push exit code**: push now exits 1 when any card fails
+
+### Diff Improvements
+
+- **Deterministic sort**: added cards sorted by title for stable output
+- **Label change tracking**: diff now reports label creates and deletes
+
 ## 0.1.7 — 2026-03-14
 
 Bug fixes and validation improvements.
