@@ -9,6 +9,7 @@ from typing import Optional
 
 from trache.api.client import TrelloClient
 from trache.cache.db import (
+    connect,
     delete_card,
     list_cards,
     read_card,
@@ -16,6 +17,7 @@ from trache.cache.db import (
     resolve_card_id,
     resolve_list_id,
     write_card,
+    write_card_pull,
     write_cards_batch,
     write_checklists,
     write_full_snapshot,
@@ -217,17 +219,14 @@ def pull_card(
     # Preserve content_modified_at for unchanged content
     _preserve_content_modified_at(card, cache_dir)
 
-    # Write to clean and working
-    write_card(card, "clean", cache_dir)
-    write_card(card, "working", cache_dir)
-
-    # Write per-card checklists
-    write_checklists(card_id, card_checklists, "clean", cache_dir)
-    write_checklists(card_id, card_checklists, "working", cache_dir)
-
-    # If card is archived/closed, remove from working so it doesn't appear in card list
-    if card.closed:
-        delete_card(card_id, "working", cache_dir)
+    # Atomic write: card + checklists to both clean and working in one transaction
+    with connect(cache_dir) as conn:
+        write_card_pull(card, card_checklists, cache_dir, conn=conn)
+        # If card is archived/closed, remove from working so it doesn't appear in card list
+        if card.closed:
+            conn.execute("DELETE FROM cards WHERE id = ? AND copy = 'working'", (card_id,))
+            conn.execute("DELETE FROM checklist_items WHERE card_id = ? AND copy = 'working'", (card_id,))
+            conn.execute("DELETE FROM checklists WHERE card_id = ? AND copy = 'working'", (card_id,))
 
     # Update card_timestamps for this card
     state = SyncState.load(cache_dir)
@@ -263,19 +262,20 @@ def pull_list(
     # Attach checklists to cards
     _attach_checklists(cards, all_checklists)
 
-    for card in cards:
-        card.description = strip_block(card.description)
-        _preserve_content_modified_at(card, cache_dir)
-        write_card(card, "clean", cache_dir)
-        write_card(card, "working", cache_dir)
-
-    # Write per-card checklists
+    # Pre-compute checklists by card
     cls_by_card: dict[str, list[Checklist]] = {}
     for cl in all_checklists:
         cls_by_card.setdefault(cl.card_id, []).append(cl)
-    for card_id, card_cls in cls_by_card.items():
-        write_checklists(card_id, card_cls, "clean", cache_dir)
-        write_checklists(card_id, card_cls, "working", cache_dir)
+
+    # Atomic write: all cards + checklists in one transaction
+    for card in cards:
+        card.description = strip_block(card.description)
+        _preserve_content_modified_at(card, cache_dir)
+
+    with connect(cache_dir) as conn:
+        for card in cards:
+            card_cls = cls_by_card.get(card.id, [])
+            write_card_pull(card, card_cls, cache_dir, conn=conn)
 
     # Update card_timestamps for all pulled cards in bulk
     state = SyncState.load(cache_dir)

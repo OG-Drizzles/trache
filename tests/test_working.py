@@ -10,12 +10,17 @@ from trache.cache.diff import compute_diff
 from trache.cache.index import build_index, resolve_card_id
 from trache.cache.models import Card, TrelloList
 from trache.cache.db import read_card, write_card
+from trache.cache.db import write_checklists_raw
 from trache.cache.working import (
+    add_checklist_item,
     archive_card,
+    check_checklist_item,
     create_card,
     edit_description,
     edit_title,
     move_card,
+    remove_checklist_item,
+    uncheck_checklist_item,
 )
 
 
@@ -119,3 +124,101 @@ class TestArchiveCard:
         card = archive_card(sample_card.uid6, cache_dir)
         assert card.closed is True
         assert card.dirty is True
+
+
+def _seed_card_with_checklist(
+    sample_card: Card, sample_lists: list[TrelloList], cache_dir: Path
+) -> None:
+    """Helper: write card + checklist to cache for checklist mutation tests."""
+    write_card(sample_card, "clean", cache_dir)
+    write_card(sample_card, "working", cache_dir)
+    build_index([sample_card], sample_lists, cache_dir / "indexes")
+    cl_data = [{
+        "id": "cl001", "name": "MVP", "card_id": sample_card.id, "pos": 1,
+        "items": [
+            {"id": "ci001", "name": "Item 1", "state": "incomplete", "pos": 1},
+            {"id": "ci002", "name": "Item 2", "state": "complete", "pos": 2},
+        ],
+    }]
+    write_checklists_raw(sample_card.id, cl_data, "working", cache_dir)
+
+
+class TestCheckChecklistItem:
+    def test_check_marks_complete(
+        self, sample_card: Card, sample_lists: list[TrelloList], cache_dir: Path
+    ) -> None:
+        _seed_card_with_checklist(sample_card, sample_lists, cache_dir)
+        result = check_checklist_item(sample_card.uid6, "ci001", cache_dir)
+        assert result["ok"] is True
+        assert result["state"] == "complete"
+        assert result["changed"] is True
+
+    def test_check_idempotent(
+        self, sample_card: Card, sample_lists: list[TrelloList], cache_dir: Path
+    ) -> None:
+        _seed_card_with_checklist(sample_card, sample_lists, cache_dir)
+        # ci002 is already complete
+        result = check_checklist_item(sample_card.uid6, "ci002", cache_dir)
+        assert result["ok"] is True
+        assert result["changed"] is False
+
+    def test_check_not_found(
+        self, sample_card: Card, sample_lists: list[TrelloList], cache_dir: Path
+    ) -> None:
+        _seed_card_with_checklist(sample_card, sample_lists, cache_dir)
+        with pytest.raises(KeyError, match="not found"):
+            check_checklist_item(sample_card.uid6, "nonexistent", cache_dir)
+
+
+class TestUncheckChecklistItem:
+    def test_uncheck_marks_incomplete(
+        self, sample_card: Card, sample_lists: list[TrelloList], cache_dir: Path
+    ) -> None:
+        _seed_card_with_checklist(sample_card, sample_lists, cache_dir)
+        result = uncheck_checklist_item(sample_card.uid6, "ci002", cache_dir)
+        assert result["ok"] is True
+        assert result["state"] == "incomplete"
+        assert result["changed"] is True
+
+    def test_uncheck_idempotent(
+        self, sample_card: Card, sample_lists: list[TrelloList], cache_dir: Path
+    ) -> None:
+        _seed_card_with_checklist(sample_card, sample_lists, cache_dir)
+        result = uncheck_checklist_item(sample_card.uid6, "ci001", cache_dir)
+        assert result["ok"] is True
+        assert result["changed"] is False
+
+
+class TestAddChecklistItem:
+    def test_add_item(
+        self, sample_card: Card, sample_lists: list[TrelloList], cache_dir: Path
+    ) -> None:
+        _seed_card_with_checklist(sample_card, sample_lists, cache_dir)
+        result = add_checklist_item(sample_card.uid6, "MVP", "New task", cache_dir)
+        assert result["ok"] is True
+        assert result["text"] == "New task"
+        assert result["item_id"].startswith("temp_")
+
+    def test_add_item_checklist_not_found(
+        self, sample_card: Card, sample_lists: list[TrelloList], cache_dir: Path
+    ) -> None:
+        _seed_card_with_checklist(sample_card, sample_lists, cache_dir)
+        with pytest.raises(KeyError, match="not found"):
+            add_checklist_item(sample_card.uid6, "Nonexistent", "text", cache_dir)
+
+
+class TestRemoveChecklistItem:
+    def test_remove_item(
+        self, sample_card: Card, sample_lists: list[TrelloList], cache_dir: Path
+    ) -> None:
+        _seed_card_with_checklist(sample_card, sample_lists, cache_dir)
+        result = remove_checklist_item(sample_card.uid6, "ci001", cache_dir)
+        assert result["ok"] is True
+        assert result["item_id"] == "ci001"
+
+    def test_remove_item_not_found(
+        self, sample_card: Card, sample_lists: list[TrelloList], cache_dir: Path
+    ) -> None:
+        _seed_card_with_checklist(sample_card, sample_lists, cache_dir)
+        with pytest.raises(KeyError, match="not found"):
+            remove_checklist_item(sample_card.uid6, "nonexistent", cache_dir)

@@ -7,9 +7,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from trache.cache.db import read_card, write_card
+from trache.cache.db import read_card, read_checklists, write_card
 from trache.cache.index import build_index
-from trache.cache.models import Board, Card, Label, TrelloList
+from trache.cache.models import Board, Card, Checklist, ChecklistItem, Label, TrelloList
 from trache.config import TracheConfig, ensure_cache_structure
 from trache.sync.pull import pull_card, pull_full_board, pull_list
 
@@ -53,20 +53,6 @@ class TestPullFullBoard:
 
         # Check state file
         assert (cache_dir / "state.json").exists()
-
-    @pytest.mark.skip(reason="board_meta.md is not written by the SQLite-backed write_full_snapshot")
-    def test_pull_creates_board_meta(self, tmp_path: Path) -> None:
-        cache_dir = tmp_path / ".trache"
-        ensure_cache_structure(cache_dir)
-        config = TracheConfig(board_id="board1")
-        config.save(cache_dir)
-
-        client = _make_mock_client([], [])
-        pull_full_board(config, client, cache_dir)
-
-        assert (cache_dir / "clean" / "board_meta.md").exists()
-        meta = (cache_dir / "clean" / "board_meta.md").read_text()
-        assert "Test Board" in meta
 
     def test_pull_strips_identity_block(self, tmp_path: Path) -> None:
         cache_dir = tmp_path / ".trache"
@@ -319,3 +305,34 @@ class TestPullList:
         result = pull_list("To Do", config, client, cache_dir, force=True)
         assert len(result) == 1
         assert result[0].title == "Server Card"
+
+
+class TestPullAtomicity:
+    """F-001/F-002: pull_card writes match across clean/working."""
+
+    def test_pull_card_clean_matches_working(self, tmp_path: Path) -> None:
+        cache_dir, config = _setup(tmp_path)
+        _card, lists = _seed_board(cache_dir)
+
+        checklist = Checklist(
+            id="cl001", name="MVP", card_id="67abc123def4567890fedcba",
+            items=[ChecklistItem(id="ci001", name="Item 1", state="complete")],
+        )
+        server_card = Card(
+            id="67abc123def4567890fedcba", board_id="board1",
+            list_id="list1", title="Server Title",
+        )
+        client = MagicMock()
+        client.get_card.return_value = server_card
+        client.get_card_checklists.return_value = [checklist]
+
+        pull_card("FEDCBA", config, client, cache_dir, force=True)
+
+        clean = read_card("67abc123def4567890fedcba", "clean", cache_dir)
+        working = read_card("67abc123def4567890fedcba", "working", cache_dir)
+        assert clean.title == working.title == "Server Title"
+
+        clean_cls = read_checklists("67abc123def4567890fedcba", "clean", cache_dir)
+        working_cls = read_checklists("67abc123def4567890fedcba", "working", cache_dir)
+        assert len(clean_cls) == len(working_cls) == 1
+        assert clean_cls[0].items[0].state == working_cls[0].items[0].state == "complete"

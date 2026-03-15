@@ -8,9 +8,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from trache.cache.db import read_card, write_card
+import json
+
+from trache.cache.db import read_card, write_card, write_lists
+from trache.cache.index import build_index
 from trache.cache.models import Board, Card, Label, TrelloList
-from trache.config import TracheConfig
+from trache.config import TracheConfig, ensure_cache_structure
 from trache.sync.pull import pull_full_board
 from trache.sync.push import push_changes
 
@@ -188,3 +191,92 @@ class TestSyncHappyPath:
         from trache.cache.diff import compute_diff
         diff = compute_diff(cache_dir)
         assert diff.is_empty
+
+
+# ---------------------------------------------------------------------------
+# F-003: Sync machine output tests
+# ---------------------------------------------------------------------------
+
+
+def _setup_sync_cli(tmp_path: Path, monkeypatch) -> Path:
+    """Set up cache for CLI sync tests with machine output."""
+    monkeypatch.chdir(tmp_path)
+    from trache.cli._output import reset_output
+    reset_output()
+
+    trache_root = tmp_path / ".trache"
+    trache_root.mkdir(exist_ok=True)
+    cache_dir = trache_root / "boards" / "test"
+    ensure_cache_structure(cache_dir)
+    config = TracheConfig(board_id="board1")
+    config.save(cache_dir)
+    (trache_root / "active").write_text("test\n")
+
+    lists = [TrelloList(id="list1", name="To Do", pos=1)]
+    write_lists(lists, cache_dir)
+    card = Card(id="67abc123def4567890fedcba", board_id="board1", list_id="list1", title="Card")
+    write_card(card, "clean", cache_dir)
+    write_card(card, "working", cache_dir)
+    build_index([card], lists, cache_dir / "indexes")
+    return cache_dir
+
+
+class TestSyncMachineOutput:
+    def test_sync_machine_output(self, tmp_path: Path, monkeypatch) -> None:
+        """F-003: sync in machine mode returns JSON with push and pull keys."""
+        cache_dir = _setup_sync_cli(tmp_path, monkeypatch)
+
+        # Dirty a card so push has something to do
+        dirty = Card(
+            id="67abc123def4567890fedcba", board_id="board1",
+            list_id="list1", title="Updated",
+        )
+        write_card(dirty, "working", cache_dir)
+
+        # Mock the API client
+        post_push = Card(
+            id="67abc123def4567890fedcba", board_id="board1",
+            list_id="list1", title="Updated",
+        )
+        client = _make_client([post_push], [TrelloList(id="list1", name="To Do", board_id="board1", pos=1)])
+        client.update_card.return_value = post_push
+        client.get_card.return_value = post_push
+        client.get_card_checklists.return_value = []
+
+        with monkeypatch.context() as m:
+            m.setattr("trache.cli.app.get_client_and_config", lambda _: (client, TracheConfig(board_id="board1")))
+            from trache.cli.app import app
+            from typer.testing import CliRunner
+            runner = CliRunner()
+            result = runner.invoke(app, ["sync"])
+
+        assert result.exit_code == 0
+        data = json.loads(result.output.strip().split("\n")[-1])
+        assert data["ok"] is True
+        assert "push" in data
+        assert "pull" in data
+
+    def test_sync_dry_run_machine_output(self, tmp_path: Path, monkeypatch) -> None:
+        """F-003: sync --dry-run in machine mode returns JSON with pull=None."""
+        cache_dir = _setup_sync_cli(tmp_path, monkeypatch)
+
+        # Dirty a card
+        dirty = Card(
+            id="67abc123def4567890fedcba", board_id="board1",
+            list_id="list1", title="Updated",
+        )
+        write_card(dirty, "working", cache_dir)
+
+        client = _make_client([], [])
+        with monkeypatch.context() as m:
+            m.setattr("trache.cli.app.get_client_and_config", lambda _: (client, TracheConfig(board_id="board1")))
+            from trache.cli.app import app
+            from typer.testing import CliRunner
+            runner = CliRunner()
+            result = runner.invoke(app, ["sync", "--dry-run"])
+
+        assert result.exit_code == 0
+        data = json.loads(result.output.strip().split("\n")[-1])
+        assert data["ok"] is True
+        assert data["dry_run"] is True
+        assert data["pull"] is None

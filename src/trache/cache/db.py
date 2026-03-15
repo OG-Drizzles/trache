@@ -109,6 +109,10 @@ def _connect(cache_dir: Path) -> Generator[sqlite3.Connection, None, None]:
         conn.close()
 
 
+# Public alias for callers that need explicit transaction control.
+connect = _connect
+
+
 # ---------------------------------------------------------------------------
 # Initialisation & migration
 # ---------------------------------------------------------------------------
@@ -799,3 +803,60 @@ def write_full_snapshot(
                                 item.pos,
                             ),
                         )
+
+
+# ---------------------------------------------------------------------------
+# Atomic card-pull write (clean + working in one transaction)
+# ---------------------------------------------------------------------------
+
+
+def write_card_pull(
+    card: Card,
+    checklists: list[Checklist],
+    cache_dir: Path,
+    *,
+    conn: sqlite3.Connection | None = None,
+) -> None:
+    """Write a card + checklists to both clean and working in a single transaction.
+
+    If *conn* is provided, uses the caller's transaction (no independent commit).
+    If *conn* is None, opens its own connection via ``connect()``.
+    """
+    if conn is not None:
+        _write_card_pull_inner(conn, card, checklists)
+    else:
+        with _connect(cache_dir) as own_conn:
+            _write_card_pull_inner(own_conn, card, checklists)
+
+
+def _write_card_pull_inner(
+    conn: sqlite3.Connection,
+    card: Card,
+    checklists: list[Checklist],
+) -> None:
+    """Core logic: insert card + checklists into both copies within *conn*."""
+    card_id = card.id
+    for copy in ("clean", "working"):
+        _insert_card(conn, card, copy)
+        # Remove old checklists + items, then insert new
+        conn.execute(
+            "DELETE FROM checklist_items WHERE card_id = ? AND copy = ?",
+            (card_id, copy),
+        )
+        conn.execute(
+            "DELETE FROM checklists WHERE card_id = ? AND copy = ?",
+            (card_id, copy),
+        )
+        for cl in checklists:
+            conn.execute(
+                """INSERT INTO checklists (id, card_id, copy, name, pos)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (cl.id, card_id, copy, cl.name, cl.pos),
+            )
+            for item in cl.items:
+                conn.execute(
+                    """INSERT INTO checklist_items
+                       (id, checklist_id, card_id, copy, name, state, pos)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (item.id, cl.id, card_id, copy, item.name, item.state, item.pos),
+                )

@@ -13,6 +13,7 @@ from trache.cache.db import (
     MIGRATION_SENTINEL,
     _db_path,
     add_list,
+    connect,
     delete_card,
     delete_stale_cards,
     init_db,
@@ -27,6 +28,7 @@ from trache.cache.db import (
     resolve_list_id,
     resolve_list_name,
     write_card,
+    write_card_pull,
     write_cards_batch,
     write_checklists,
     write_full_snapshot,
@@ -485,3 +487,43 @@ class TestMigration:
         assert not (d / "working").exists()
         assert not (d / "indexes").exists()
         assert not (d / MIGRATION_SENTINEL).exists()
+
+
+# ---------------------------------------------------------------------------
+# write_card_pull (atomic card-pull write)
+# ---------------------------------------------------------------------------
+
+
+class TestWriteCardPull:
+    def test_roundtrip_both_copies(self, db_dir: Path) -> None:
+        """write_card_pull writes card + checklists to both clean and working."""
+        card = _make_card()
+        cl = Checklist(
+            id="cl001", name="MVP", card_id=card.id,
+            items=[ChecklistItem(id="ci001", name="Item 1", state="complete")],
+        )
+        write_card_pull(card, [cl], db_dir)
+
+        for copy in ("clean", "working"):
+            loaded = read_card(card.id, copy, db_dir)
+            assert loaded.title == card.title
+            cls = read_checklists(card.id, copy, db_dir)
+            assert len(cls) == 1
+            assert cls[0].items[0].state == "complete"
+
+    def test_caller_conn_no_independent_commit(self, db_dir: Path) -> None:
+        """When conn is provided, write_card_pull doesn't commit independently."""
+        card = _make_card()
+        cl = Checklist(
+            id="cl001", name="MVP", card_id=card.id,
+            items=[ChecklistItem(id="ci001", name="Item 1", state="incomplete")],
+        )
+
+        with connect(db_dir) as conn:
+            write_card_pull(card, [cl], db_dir, conn=conn)
+            # Still inside caller's transaction — rollback to prove no independent commit
+            conn.rollback()
+
+        # Data should NOT exist because we rolled back the caller's transaction
+        with pytest.raises(FileNotFoundError):
+            read_card(card.id, "clean", db_dir)

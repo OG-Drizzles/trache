@@ -119,15 +119,19 @@ trache push                             # Push to Trello
 
 For full command syntax, examples, and troubleshooting, invoke the `/trache` skill.
 
+### Additional Commands
+
+- **`trache stale`** — check if the board has remote changes since the last pull (one cheap API call).
+- **`trache batch run`** — execute multiple local-first commands from stdin (one per line, JSON output).
+
 ### File Layout
 
 ```
 .trache/
-  config.json                      # Board ID, auth env var names
-  state.json                       # Last pull timestamp
-  indexes/index.json               # Unified discovery index
-  clean/cards/*.md                 # Baseline card files
-  clean/checklists/<card_id>.json  # Baseline checklists
-  working/cards/*.md               # Editable card files
-  working/checklists/<card_id>.json # Editable checklists
+  boards/
+    <alias>/
+      config.json       # Board ID, auth env var names
+      cache.db           # SQLite WAL store (cards, checklists, labels, lists)
+      state.json         # Last pull timestamp, board_last_activity
+  active                 # Current active board alias
 ```

@@ -9,10 +9,12 @@ from uuid import uuid4
 from trache.cache.db import (
     list_cards,
     read_card,
+    read_checklists_raw,
     read_labels_raw,
     resolve_card_id,
     resolve_list_id,
     write_card,
+    write_checklists_raw,
 )
 from trache.cache.models import Card
 
@@ -146,3 +148,88 @@ def remove_label(identifier: str, label_name: str, cache_dir: Path) -> Card:
     card.dirty = True
     write_card(card, "working", cache_dir)
     return card
+
+
+# ---------------------------------------------------------------------------
+# Checklist mutations (shared by CLI checklist commands and batch)
+# ---------------------------------------------------------------------------
+
+
+def _checklist_update(
+    identifier: str, cache_dir: Path, mutate_fn
+) -> dict:
+    """Resolve → load → mutate → save → dirty card. Returns mutate_fn result."""
+    card_id = resolve_card_id(identifier, cache_dir)
+    checklists = read_checklists_raw(card_id, "working", cache_dir)
+    result = mutate_fn(checklists)
+    write_checklists_raw(card_id, checklists, "working", cache_dir)
+    # Dirty the card
+    try:
+        card = read_card(card_id, "working", cache_dir)
+        card.content_modified_at = _now()
+        card.dirty = True
+        write_card(card, "working", cache_dir)
+    except FileNotFoundError:
+        pass
+    return result
+
+
+def check_checklist_item(identifier: str, item_id: str, cache_dir: Path) -> dict:
+    """Mark a checklist item complete. Idempotent. Returns {ok, item_id, state, changed}."""
+    def _mutate(checklists: list[dict]) -> dict:
+        for cl in checklists:
+            for item in cl.get("items", []):
+                if item["id"] == item_id:
+                    changed = item["state"] != "complete"
+                    item["state"] = "complete"
+                    return {"ok": True, "item_id": item_id, "state": "complete", "changed": changed}
+        raise KeyError(f"Item {item_id} not found")
+
+    return _checklist_update(identifier, cache_dir, _mutate)
+
+
+def uncheck_checklist_item(identifier: str, item_id: str, cache_dir: Path) -> dict:
+    """Mark a checklist item incomplete. Idempotent. Returns {ok, item_id, state, changed}."""
+    def _mutate(checklists: list[dict]) -> dict:
+        for cl in checklists:
+            for item in cl.get("items", []):
+                if item["id"] == item_id:
+                    changed = item["state"] != "incomplete"
+                    item["state"] = "incomplete"
+                    return {"ok": True, "item_id": item_id, "state": "incomplete", "changed": changed}
+        raise KeyError(f"Item {item_id} not found")
+
+    return _checklist_update(identifier, cache_dir, _mutate)
+
+
+def add_checklist_item(
+    identifier: str, checklist_name: str, text: str, cache_dir: Path
+) -> dict:
+    """Add an item to a checklist by name. Returns {ok, item_id, text}."""
+    from uuid import uuid4 as _uuid4
+
+    def _mutate(checklists: list[dict]) -> dict:
+        for cl in checklists:
+            if cl["name"] == checklist_name:
+                temp_id = f"temp_{_uuid4().hex[:14]}t~"
+                max_pos = max((i.get("pos", 0) for i in cl.get("items", [])), default=0)
+                cl.setdefault("items", []).append({
+                    "id": temp_id, "name": text, "state": "incomplete", "pos": max_pos + 1024,
+                })
+                return {"ok": True, "item_id": temp_id, "text": text}
+        raise KeyError(f"Checklist '{checklist_name}' not found")
+
+    return _checklist_update(identifier, cache_dir, _mutate)
+
+
+def remove_checklist_item(identifier: str, item_id: str, cache_dir: Path) -> dict:
+    """Remove an item from a checklist. Returns {ok, item_id}."""
+    def _mutate(checklists: list[dict]) -> dict:
+        for cl in checklists:
+            for i, item in enumerate(cl.get("items", [])):
+                if item["id"] == item_id:
+                    cl["items"].pop(i)
+                    return {"ok": True, "item_id": item_id}
+        raise KeyError(f"Item {item_id} not found")
+
+    return _checklist_update(identifier, cache_dir, _mutate)

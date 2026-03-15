@@ -412,22 +412,7 @@ def push(
         raise typer.Exit(1)
 
     if not out.is_human:
-        out.json({
-            "total": result.total,
-            "pushed": [
-                {"uid6": e.uid6, "title": e.title, "fields": e.fields}
-                for e in result.pushed
-            ],
-            "created": [
-                {"uid6": e.uid6, "title": e.title, "old_uid6": e.old_uid6}
-                for e in result.created
-            ],
-            "archived": [
-                {"uid6": e.uid6, "title": e.title}
-                for e in result.archived
-            ],
-            "errors": result.errors,
-        })
+        out.json(_serialise_push_result(result))
         if result.errors:
             raise typer.Exit(1)
         return
@@ -463,6 +448,26 @@ def push(
         raise typer.Exit(1)
 
 
+def _serialise_push_result(result) -> dict:
+    """Convert a PushResult to a JSON-serialisable dict."""
+    return {
+        "total": result.total,
+        "pushed": [
+            {"uid6": e.uid6, "title": e.title, "fields": e.fields}
+            for e in result.pushed
+        ],
+        "created": [
+            {"uid6": e.uid6, "title": e.title, "old_uid6": e.old_uid6}
+            for e in result.created
+        ],
+        "archived": [
+            {"uid6": e.uid6, "title": e.title}
+            for e in result.archived
+        ],
+        "errors": result.errors,
+    }
+
+
 @app.command()
 def sync(
     card: Optional[str] = typer.Option(
@@ -483,33 +488,55 @@ def sync(
         changeset, result = push_changes(
             config, client, cache_dir, dry_run=dry_run, card_filter=card,
         )
+
+        push_data = _serialise_push_result(result)
+
         if not changeset.is_empty:
             out.human(f"Pushed {result.total} changes")
             if result.errors:
                 for err in result.errors:
                     out.error(err)
-                out.error("Push had errors — skipping pull to preserve local state")
+                if not out.is_human:
+                    out.json({"ok": False, "stage": "push", "push": push_data, "pull": None})
+                else:
+                    out.error("Push had errors — skipping pull to preserve local state")
                 raise typer.Exit(1)
 
         # Only pull if no errors
+        pull_data: dict | None = None
         if not dry_run:
             if card:
                 pull_result = pull_card(card, config, client, cache_dir, force=True)
                 out.human(
                     f"[green]Pulled card: {escape(pull_result.title)} [{pull_result.uid6}][/green]"
                 )
+                pull_data = {
+                    "uid6": pull_result.uid6, "title": pull_result.title,
+                    "list": pull_result.list_id, "description": pull_result.description,
+                }
             else:
                 pull_result = pull_full_board(config, client, cache_dir, force=True)
                 if pull_result is None:
                     out.human("Already up to date.")
+                    pull_data = {"up_to_date": True}
                 else:
                     out.human(
                         f"[green]Pulled {escape(pull_result.board_name)}: "
                         f"{pull_result.cards} cards, {pull_result.lists} lists, "
                         f"{pull_result.labels} labels, {pull_result.checklists} checklists[/green]"
                     )
+                    pull_data = {
+                        "board_name": pull_result.board_name,
+                        "cards": pull_result.cards,
+                        "lists": pull_result.lists,
+                        "labels": pull_result.labels,
+                        "checklists": pull_result.checklists,
+                    }
         else:
             out.human("[yellow]Dry run — skipping pull[/yellow]")
+
+    if not out.is_human:
+        out.json({"ok": True, "dry_run": dry_run, "push": push_data, "pull": pull_data})
 
     out.api_stats()
 

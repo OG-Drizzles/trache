@@ -22,12 +22,12 @@ def _cache_dir() -> Path:
 @list_app.command("show")
 def show_lists() -> None:
     """List all board lists (reads local index, no API call)."""
-    from trache.cache.index import load_index
+    from trache.cache.db import load_cards_index, read_lists
 
     out = get_output()
-    index_dir = _cache_dir() / "indexes"
-    lists_index = load_index(index_dir, "lists_by_id")
-    cards_index = load_index(index_dir, "cards_by_id")
+    cache_dir = _cache_dir()
+    lists_index = read_lists(cache_dir)
+    cards_index = load_cards_index(cache_dir)
 
     if not lists_index:
         out.human("[dim]No lists found. Run `trache pull` first.[/dim]")
@@ -66,14 +66,15 @@ def create(
     pos: str = typer.Option("bottom", "--pos", "-p", help="Position: top or bottom"),
 ) -> None:
     """Create a new list on the board (API-direct)."""
-    from trache.cache.index import add_list_to_index
+    from trache.cache.db import add_list
 
     out = get_output()
-    client, config = get_client_and_config(_cache_dir())
+    cache_dir = _cache_dir()
+    client, config = get_client_and_config(cache_dir)
     with client:
         trello_list = client.create_list(config.board_id, name, pos=pos)
 
-    add_list_to_index(trello_list.id, trello_list.name, trello_list.pos, _cache_dir() / "indexes")
+    add_list(trello_list.id, trello_list.name, trello_list.pos, cache_dir)
     if out.is_human:
         out.human(
             f"[green]Created list: {escape(trello_list.name)} (API — available immediately)[/green]"
@@ -89,17 +90,17 @@ def rename(
     new_name: str = typer.Argument(help="New name for the list"),
 ) -> None:
     """Rename a list (API-direct)."""
-    from trache.cache.index import resolve_list_id, update_list_in_index
+    from trache.cache.db import resolve_list_id, update_list
 
     out = get_output()
-    index_dir = _cache_dir() / "indexes"
-    list_id = resolve_list_id(identifier, index_dir)
+    cache_dir = _cache_dir()
+    list_id = resolve_list_id(identifier, cache_dir)
 
-    client, _config = get_client_and_config(_cache_dir())
+    client, _config = get_client_and_config(cache_dir)
     with client:
         trello_list = client.rename_list(list_id, new_name)
 
-    update_list_in_index(trello_list.id, trello_list.name, trello_list.pos, index_dir)
+    update_list(trello_list.id, trello_list.name, trello_list.pos, cache_dir)
     if out.is_human:
         out.human(
             f"[green]Renamed list → {escape(trello_list.name)} (API — available immediately)[/green]"
@@ -115,7 +116,7 @@ def archive(
     yes: bool = typer.Option(False, "--yes", "-y", help="Confirm archiving"),
 ) -> None:
     """Archive (close) a list (API-direct). Requires --yes flag."""
-    from trache.cache.index import remove_list_from_index, resolve_list_id
+    from trache.cache.db import remove_list, resolve_list_id
 
     out = get_output()
 
@@ -123,14 +124,14 @@ def archive(
         out.error("Archiving a list is destructive. Pass --yes to confirm.")
         raise typer.Exit(1)
 
-    index_dir = _cache_dir() / "indexes"
-    list_id = resolve_list_id(identifier, index_dir)
+    cache_dir = _cache_dir()
+    list_id = resolve_list_id(identifier, cache_dir)
 
-    client, _config = get_client_and_config(_cache_dir())
+    client, _config = get_client_and_config(cache_dir)
     with client:
         client.archive_list(list_id)
 
-    remove_list_from_index(list_id, index_dir)
+    remove_list(list_id, cache_dir)
     if out.is_human:
         out.human("[green]Archived list (API — effective immediately)[/green]")
     else:

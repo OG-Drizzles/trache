@@ -19,37 +19,6 @@ def _cache_dir() -> Path:
     return resolve_cache_dir()
 
 
-def _load_checklists_for_card(card_identifier: str) -> tuple[str, list[dict]]:
-    """Load all checklists for a card from working cache. Returns (card_id, checklists)."""
-    from trache.cache.db import read_checklists_raw, resolve_card_id
-
-    cache_dir = _cache_dir()
-    card_id = resolve_card_id(card_identifier, cache_dir)
-    return card_id, read_checklists_raw(card_id, "working", cache_dir)
-
-
-def _save_checklists_for_card(card_id: str, checklists: list[dict]) -> None:
-    """Write checklists back to the working copy."""
-    from trache.cache.db import write_checklists_raw
-
-    cache_dir = _cache_dir()
-    write_checklists_raw(card_id, checklists, "working", cache_dir)
-
-
-def _update_card_content_modified_at(card_id: str) -> None:
-    """Update the card's content_modified_at in the working copy."""
-    from trache.cache.db import read_card, write_card
-
-    cache_dir = _cache_dir()
-    try:
-        card = read_card(card_id, "working", cache_dir)
-        card.content_modified_at = datetime.now(timezone.utc)
-        card.dirty = True
-        write_card(card, "working", cache_dir)
-    except FileNotFoundError:
-        pass
-
-
 @checklist_app.command("create")
 @handle_resolve_errors
 def create(
@@ -58,9 +27,14 @@ def create(
     force: bool = typer.Option(False, "--force", help="Allow editing archived cards"),
 ) -> None:
     """Create a new checklist on a card (local-first, push to sync)."""
+    from trache.cache.db import read_checklists_raw, resolve_card_id, write_checklists_raw
+    from trache.cache.db import read_card, write_card
+
     out = get_output()
-    guard_archived(card_identifier, _cache_dir(), force=force)
-    card_id, checklists = _load_checklists_for_card(card_identifier)
+    cache_dir = _cache_dir()
+    guard_archived(card_identifier, cache_dir, force=force)
+    card_id = resolve_card_id(card_identifier, cache_dir)
+    checklists = read_checklists_raw(card_id, "working", cache_dir)
 
     # Check for duplicate name
     for cl in checklists:
@@ -71,8 +45,16 @@ def create(
     temp_id = f"temp_{uuid4().hex[:14]}t~"
     checklists.append({"id": temp_id, "name": name, "items": []})
 
-    _save_checklists_for_card(card_id, checklists)
-    _update_card_content_modified_at(card_id)
+    write_checklists_raw(card_id, checklists, "working", cache_dir)
+    # Dirty the card
+    try:
+        card = read_card(card_id, "working", cache_dir)
+        card.content_modified_at = datetime.now(timezone.utc)
+        card.dirty = True
+        write_card(card, "working", cache_dir)
+    except FileNotFoundError:
+        pass
+
     if out.is_human:
         out.human(f"[green]Checklist created: {name} ({temp_id}) — push to sync[/green]")
     else:
@@ -85,8 +67,12 @@ def show(
     card_identifier: str = typer.Argument(help="Card ID or UID6"),
 ) -> None:
     """Show checklists for a card."""
+    from trache.cache.db import read_checklists_raw, resolve_card_id
+
     out = get_output()
-    _card_id, checklists = _load_checklists_for_card(card_identifier)
+    cache_dir = _cache_dir()
+    card_id = resolve_card_id(card_identifier, cache_dir)
+    checklists = read_checklists_raw(card_id, "working", cache_dir)
 
     if not checklists:
         if out.is_human:
@@ -114,35 +100,21 @@ def check(
     force: bool = typer.Option(False, "--force", help="Allow editing archived cards"),
 ) -> None:
     """Mark a checklist item as complete (local-first, push to sync)."""
+    from trache.cache.working import check_checklist_item
+
     out = get_output()
-    guard_archived(card_identifier, _cache_dir(), force=force)
-    card_id, checklists = _load_checklists_for_card(card_identifier)
+    cache_dir = _cache_dir()
+    guard_archived(card_identifier, cache_dir, force=force)
 
-    found = False
-    already = False
-    for cl in checklists:
-        for item in cl.get("items", []):
-            if item["id"] == item_id:
-                already = item["state"] == "complete"
-                item["state"] = "complete"
-                found = True
-                break
-        if found:
-            break
+    result = check_checklist_item(card_identifier, item_id, cache_dir)
 
-    if not found:
-        out.error(f"Item {item_id} not found")
-        raise typer.Exit(1)
-
-    if already:
+    if not result["changed"]:
         if out.is_human:
             out.human("[dim]Item already complete — no change[/dim]")
         else:
             out.json({"ok": True, "item_id": item_id, "changed": False})
         return
 
-    _save_checklists_for_card(card_id, checklists)
-    _update_card_content_modified_at(card_id)
     if out.is_human:
         out.human("[green]Item marked complete (local — push to sync)[/green]")
     else:
@@ -157,35 +129,21 @@ def uncheck(
     force: bool = typer.Option(False, "--force", help="Allow editing archived cards"),
 ) -> None:
     """Mark a checklist item as incomplete (local-first, push to sync)."""
+    from trache.cache.working import uncheck_checklist_item
+
     out = get_output()
-    guard_archived(card_identifier, _cache_dir(), force=force)
-    card_id, checklists = _load_checklists_for_card(card_identifier)
+    cache_dir = _cache_dir()
+    guard_archived(card_identifier, cache_dir, force=force)
 
-    found = False
-    already = False
-    for cl in checklists:
-        for item in cl.get("items", []):
-            if item["id"] == item_id:
-                already = item["state"] == "incomplete"
-                item["state"] = "incomplete"
-                found = True
-                break
-        if found:
-            break
+    result = uncheck_checklist_item(card_identifier, item_id, cache_dir)
 
-    if not found:
-        out.error(f"Item {item_id} not found")
-        raise typer.Exit(1)
-
-    if already:
+    if not result["changed"]:
         if out.is_human:
             out.human("[dim]Item already incomplete — no change[/dim]")
         else:
             out.json({"ok": True, "item_id": item_id, "changed": False})
         return
 
-    _save_checklists_for_card(card_id, checklists)
-    _update_card_content_modified_at(card_id)
     if out.is_human:
         out.human("[yellow]Item marked incomplete (local — push to sync)[/yellow]")
     else:
@@ -203,37 +161,18 @@ def add_item(
     force: bool = typer.Option(False, "--force", help="Allow editing archived cards"),
 ) -> None:
     """Add an item to a checklist by name (local-first, push to sync)."""
+    from trache.cache.working import add_checklist_item
+
     out = get_output()
-    guard_archived(card_identifier, _cache_dir(), force=force)
-    card_id, checklists = _load_checklists_for_card(card_identifier)
+    cache_dir = _cache_dir()
+    guard_archived(card_identifier, cache_dir, force=force)
 
-    target_cl = None
-    for cl in checklists:
-        if cl["name"] == checklist_name:
-            target_cl = cl
-            break
+    result = add_checklist_item(card_identifier, checklist_name, text, cache_dir)
 
-    if target_cl is None:
-        out.error(f"Checklist '{checklist_name}' not found for this card")
-        raise typer.Exit(1)
-
-    # Generate temp ID for the new item
-    temp_id = f"temp_{uuid4().hex[:14]}t~"
-    max_pos = max((item.get("pos", 0) for item in target_cl.get("items", [])), default=0)
-    new_item = {
-        "id": temp_id,
-        "name": text,
-        "state": "incomplete",
-        "pos": max_pos + 1024,
-    }
-    target_cl.setdefault("items", []).append(new_item)
-
-    _save_checklists_for_card(card_id, checklists)
-    _update_card_content_modified_at(card_id)
     if out.is_human:
-        out.human(f"[green]Added: {text} ({temp_id}) — push to sync[/green]")
+        out.human(f"[green]Added: {text} ({result['item_id']}) — push to sync[/green]")
     else:
-        out.json({"ok": True, "item_id": temp_id, "text": text})
+        out.json({"ok": True, "item_id": result["item_id"], "text": text})
 
 
 @checklist_app.command("remove-item")
@@ -244,26 +183,14 @@ def remove_item(
     force: bool = typer.Option(False, "--force", help="Allow editing archived cards"),
 ) -> None:
     """Remove an item from a checklist (local-first, push to sync)."""
+    from trache.cache.working import remove_checklist_item
+
     out = get_output()
-    guard_archived(card_identifier, _cache_dir(), force=force)
-    card_id, checklists = _load_checklists_for_card(card_identifier)
+    cache_dir = _cache_dir()
+    guard_archived(card_identifier, cache_dir, force=force)
 
-    found = False
-    for cl in checklists:
-        for i, item in enumerate(cl.get("items", [])):
-            if item["id"] == item_id:
-                cl["items"].pop(i)
-                found = True
-                break
-        if found:
-            break
+    remove_checklist_item(card_identifier, item_id, cache_dir)
 
-    if not found:
-        out.error(f"Item {item_id} not found")
-        raise typer.Exit(1)
-
-    _save_checklists_for_card(card_id, checklists)
-    _update_card_content_modified_at(card_id)
     if out.is_human:
         out.human("[yellow]Item removed (local — push to sync)[/yellow]")
     else:

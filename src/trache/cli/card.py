@@ -80,16 +80,22 @@ def show_card(
     out = get_output()
 
     if not out.is_human:
-        import json
+        from trache.cache.db import read_checklists_raw, resolve_list_name
+
+        list_name = resolve_list_name(card.list_id, cache_dir)
+        checklists_data = read_checklists_raw(card.id, "working", cache_dir)
         data = {
             "id": card.id,
             "uid6": card.uid6,
             "title": card.title,
             "description": card.description,
             "list_id": card.list_id,
+            "list_name": list_name,
             "labels": card.labels,
+            "due": card.due.isoformat() if card.due else None,
             "closed": card.closed,
             "dirty": card.dirty,
+            "checklists": checklists_data,
         }
         out.json(data)
         return

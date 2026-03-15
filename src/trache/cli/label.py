@@ -122,4 +122,9 @@ def delete(
     if out.is_human:
         out.human(f"[yellow]Label deleted: {name} (local — push to sync)[/yellow]")
     else:
-        out.json({"ok": True, "name": name})
+        out.json({
+            "ok": True,
+            "name": name,
+            "affected_cards": using_cards,
+            "affected_count": len(using_cards),
+        })

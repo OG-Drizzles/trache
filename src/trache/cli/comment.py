@@ -26,12 +26,12 @@ def add(
     """Add a comment to a card (pushes immediately)."""
     from trache.api.auth import TrelloAuth
     from trache.api.client import TrelloClient
-    from trache.cache.index import resolve_card_id
+    from trache.cache.db import resolve_card_id
     from trache.config import TracheConfig
 
     out = get_output()
     cache_dir = _cache_dir()
-    card_id = resolve_card_id(card_identifier, cache_dir / "indexes")
+    card_id = resolve_card_id(card_identifier, cache_dir)
 
     config = TracheConfig.load(cache_dir)
     auth = TrelloAuth.from_env(config.api_key_env, config.token_env)
@@ -53,12 +53,12 @@ def edit(
     """Edit a comment on a card (updates immediately via API)."""
     from trache.api.auth import TrelloAuth
     from trache.api.client import TrelloClient
-    from trache.cache.index import resolve_card_id
+    from trache.cache.db import resolve_card_id
     from trache.config import TracheConfig
 
     out = get_output()
     cache_dir = _cache_dir()
-    card_id = resolve_card_id(card_identifier, cache_dir / "indexes")
+    card_id = resolve_card_id(card_identifier, cache_dir)
 
     config = TracheConfig.load(cache_dir)
     auth = TrelloAuth.from_env(config.api_key_env, config.token_env)
@@ -86,11 +86,11 @@ def delete(
 
     from trache.api.auth import TrelloAuth
     from trache.api.client import TrelloClient
-    from trache.cache.index import resolve_card_id
+    from trache.cache.db import resolve_card_id
     from trache.config import TracheConfig
 
     cache_dir = _cache_dir()
-    card_id = resolve_card_id(card_identifier, cache_dir / "indexes")
+    card_id = resolve_card_id(card_identifier, cache_dir)
 
     config = TracheConfig.load(cache_dir)
     auth = TrelloAuth.from_env(config.api_key_env, config.token_env)
@@ -111,12 +111,12 @@ def list_comments(
     """List comments on a card (fetches from API)."""
     from trache.api.auth import TrelloAuth
     from trache.api.client import TrelloClient
-    from trache.cache.index import resolve_card_id
+    from trache.cache.db import resolve_card_id
     from trache.config import TracheConfig
 
     out = get_output()
     cache_dir = _cache_dir()
-    card_id = resolve_card_id(card_identifier, cache_dir / "indexes")
+    card_id = resolve_card_id(card_identifier, cache_dir)
 
     config = TracheConfig.load(cache_dir)
     auth = TrelloAuth.from_env(config.api_key_env, config.token_env)

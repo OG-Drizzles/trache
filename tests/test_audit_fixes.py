@@ -145,10 +145,3 @@ class TestRepullFailureSurfaced:
 
         assert len(result.pushed) == 1
         assert any("Re-pull failed" in e for e in result.errors)
-
-
-class TestOldChecklistsMigration:
-    @pytest.mark.skip(reason="old checklists dir migration not applicable with SQLite backend")
-    def test_old_checklists_dir_removed_on_pull(self, tmp_path: Path) -> None:
-        """Old flat checklists/ dir is cleaned up during full board pull."""
-        pass

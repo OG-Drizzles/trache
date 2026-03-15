@@ -22,15 +22,18 @@ def _register_handlers() -> None:
     if _DISPATCH:
         return  # Already registered
 
-    from trache.cache.db import read_card, resolve_card_id, write_card
     from trache.cache.working import (
+        add_checklist_item,
         add_label,
         archive_card,
+        check_checklist_item,
         create_card,
         edit_description,
         edit_title,
         move_card,
+        remove_checklist_item,
         remove_label,
+        uncheck_checklist_item,
     )
 
     def _handle_edit_title(args: list[str], cache_dir: Path, board_id: str) -> dict:
@@ -85,82 +88,22 @@ def _register_handlers() -> None:
     def _handle_checklist_check(args: list[str], cache_dir: Path, board_id: str) -> dict:
         if len(args) < 2:
             return {"ok": False, "error": "Usage: checklist check <uid6> <item_id>"}
-        from trache.cache.db import read_card as db_read_card, read_checklists_raw, resolve_card_id as db_resolve, write_card as db_write_card, write_checklists_raw
-        from datetime import datetime, timezone
-        card_id = db_resolve(args[0], cache_dir)
-        checklists = read_checklists_raw(card_id, "working", cache_dir)
-        for cl in checklists:
-            for item in cl.get("items", []):
-                if item["id"] == args[1]:
-                    item["state"] = "complete"
-                    write_checklists_raw(card_id, checklists, "working", cache_dir)
-                    card = db_read_card(card_id, "working", cache_dir)
-                    card.content_modified_at = datetime.now(timezone.utc)
-                    card.dirty = True
-                    db_write_card(card, "working", cache_dir)
-                    return {"ok": True, "item_id": args[1], "state": "complete"}
-        return {"ok": False, "error": f"Item {args[1]} not found"}
+        return check_checklist_item(args[0], args[1], cache_dir)
 
     def _handle_checklist_uncheck(args: list[str], cache_dir: Path, board_id: str) -> dict:
         if len(args) < 2:
             return {"ok": False, "error": "Usage: checklist uncheck <uid6> <item_id>"}
-        from trache.cache.db import read_card as db_read_card, read_checklists_raw, resolve_card_id as db_resolve, write_card as db_write_card, write_checklists_raw
-        from datetime import datetime, timezone
-        card_id = db_resolve(args[0], cache_dir)
-        checklists = read_checklists_raw(card_id, "working", cache_dir)
-        for cl in checklists:
-            for item in cl.get("items", []):
-                if item["id"] == args[1]:
-                    item["state"] = "incomplete"
-                    write_checklists_raw(card_id, checklists, "working", cache_dir)
-                    card = db_read_card(card_id, "working", cache_dir)
-                    card.content_modified_at = datetime.now(timezone.utc)
-                    card.dirty = True
-                    db_write_card(card, "working", cache_dir)
-                    return {"ok": True, "item_id": args[1], "state": "incomplete"}
-        return {"ok": False, "error": f"Item {args[1]} not found"}
+        return uncheck_checklist_item(args[0], args[1], cache_dir)
 
     def _handle_checklist_add_item(args: list[str], cache_dir: Path, board_id: str) -> dict:
         if len(args) < 3:
             return {"ok": False, "error": "Usage: checklist add-item <uid6> <checklist_name> <text>"}
-        from trache.cache.db import read_card as db_read_card, read_checklists_raw, resolve_card_id as db_resolve, write_card as db_write_card, write_checklists_raw
-        from datetime import datetime, timezone
-        from uuid import uuid4
-        card_id = db_resolve(args[0], cache_dir)
-        checklists = read_checklists_raw(card_id, "working", cache_dir)
-        for cl in checklists:
-            if cl["name"] == args[1]:
-                temp_id = f"temp_{uuid4().hex[:14]}t~"
-                max_pos = max((i.get("pos", 0) for i in cl.get("items", [])), default=0)
-                cl.setdefault("items", []).append({
-                    "id": temp_id, "name": args[2], "state": "incomplete", "pos": max_pos + 1024,
-                })
-                write_checklists_raw(card_id, checklists, "working", cache_dir)
-                card = db_read_card(card_id, "working", cache_dir)
-                card.content_modified_at = datetime.now(timezone.utc)
-                card.dirty = True
-                db_write_card(card, "working", cache_dir)
-                return {"ok": True, "item_id": temp_id, "text": args[2]}
-        return {"ok": False, "error": f"Checklist '{args[1]}' not found"}
+        return add_checklist_item(args[0], args[1], args[2], cache_dir)
 
     def _handle_checklist_remove_item(args: list[str], cache_dir: Path, board_id: str) -> dict:
         if len(args) < 2:
             return {"ok": False, "error": "Usage: checklist remove-item <uid6> <item_id>"}
-        from trache.cache.db import read_card as db_read_card, read_checklists_raw, resolve_card_id as db_resolve, write_card as db_write_card, write_checklists_raw
-        from datetime import datetime, timezone
-        card_id = db_resolve(args[0], cache_dir)
-        checklists = read_checklists_raw(card_id, "working", cache_dir)
-        for cl in checklists:
-            for i, item in enumerate(cl.get("items", [])):
-                if item["id"] == args[1]:
-                    cl["items"].pop(i)
-                    write_checklists_raw(card_id, checklists, "working", cache_dir)
-                    card = db_read_card(card_id, "working", cache_dir)
-                    card.content_modified_at = datetime.now(timezone.utc)
-                    card.dirty = True
-                    db_write_card(card, "working", cache_dir)
-                    return {"ok": True, "item_id": args[1]}
-        return {"ok": False, "error": f"Item {args[1]} not found"}
+        return remove_checklist_item(args[0], args[1], cache_dir)
 
     _DISPATCH[("card", "edit-title")] = _handle_edit_title
     _DISPATCH[("card", "edit-desc")] = _handle_edit_desc
