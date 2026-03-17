@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 — 2026-03-17
+
+### License
+
+- **License changed from MIT to AGPL-3.0-or-later**: updated `LICENSE`, `pyproject.toml`, and `README.md`. All prior versions (0.1.0–0.3.0) were released under MIT; from this version onward the project is licensed under the GNU Affero General Public License v3.0 or later.
+
 ## 0.3.0 — 2026-03-15
 
 Major release: SQLite storage backend, machine-first output layer, batch operations, staleness checks, and three rounds of audit remediation.

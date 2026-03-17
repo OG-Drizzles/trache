@@ -7,7 +7,7 @@ name = "trache"
 dynamic = ["version"]
 description = "Local-first Trello cache with Git-style sync — optimised for on-machine AI workflows"
 requires-python = ">=3.10"
-license = {text = "MIT"}
+license = {text = "AGPL-3.0-or-later"}
 authors = [{name = "OG-Drizzles"}]
 dependencies = [
     "typer>=0.9",
