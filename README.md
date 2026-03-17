@@ -1,13 +1,27 @@
-# Trache
+# **Trache**
 
-Stop burning tokens talking to Trello. Pull once, work locally, push when you're done.
+### Are you sick of paying premium token prices to load an entire Trello board just to rename one card?
 
-Trache gives your AI agent (or you) a local cache of a Trello board with Git-style `pull`/`push` semantics. Reading a card is a file read. Editing a card is a file write. Nothing hits the network until you say `trache push`.
+Has your AI ever pulled half of Trello into context, chewed 27% of your weekly tokens, changed exactly one line of text, only to hit you with:
+**"Done! If you need anything else changed, just say the word."**
 
-```
-Reading one card via MCP/API:  ~4,000 tokens + network round-trip
-Reading one card via trache:   one local SQLite read, zero tokens wasted
-```
+Do you enjoy round-tripping through MCP/API calls, loading giant JSON blobs, and paying for the privilege of doing something your machine could have handled locally in the first place?
+
+**Good news.** There is now a worse-named but better-behaved solution.
+
+**Trache** is a local-first Trello cache, built for AI agents.  
+Trache is what happens when ***Tr***ello and C***ache*** love each other very much ...
+
+It pulls your board once, stores it locally, and lets your agent work on cards like normal files:
+
+- read a card = local file read
+- edit a card = local file write
+- review changes = local diff
+- hit Trello only when you actually mean to
+
+In other words: **stop making your AI re-download Trello’s life story every time it wants to edit one card.**
+
+Trache gives you Git-style `pull` / `push` semantics for Trello, with targeted operations, cheap local discovery, and explicit sync only when you actually want it. Reading a card becomes a file read. Editing a card becomes a file write. Nothing hits the network until you say so.
 
 > **Using an AI agent?** Run `trache agents` after setup for agent-specific instructions, or `trache agents --reference` for a compact command cheat-sheet.
 
