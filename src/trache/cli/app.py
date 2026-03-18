@@ -108,7 +108,15 @@ def init(
             out.human(f"[green]Created board: {board_obj.name} on Trello[/green]")
 
     if not board_id and not board_url and not new:
-        board_id = typer.prompt("Board ID")
+        import sys
+
+        if sys.stdin.isatty() and out.is_human:
+            board_id = typer.prompt("Board ID")
+        else:
+            out.error(
+                "Board ID required. Use --board-id <id> or --board-url <url>."
+            )
+            raise typer.Exit(1)
 
     if board_url and not board_id:
         parts = board_url.rstrip("/").split("/")

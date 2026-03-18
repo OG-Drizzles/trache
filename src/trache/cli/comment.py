@@ -22,14 +22,29 @@ def _cache_dir() -> Path:
 def add(
     card_identifier: str = typer.Argument(help="Card ID or UID6"),
     text: str = typer.Argument(help="Comment text"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Confirm API-direct action"),
 ) -> None:
     """Add a comment to a card (pushes immediately)."""
+    out = get_output()
+
+    if not yes:
+        if out.is_human:
+            out.human(
+                "[yellow]This will post immediately to Trello"
+                " (API-direct, not staged).[/yellow]"
+            )
+        else:
+            out.error(
+                "Comment commands are API-direct (not staged). "
+                "Pass --yes to confirm."
+            )
+            raise typer.Exit(1)
+
     from trache.api.auth import TrelloAuth
     from trache.api.client import TrelloClient
     from trache.cache.db import resolve_card_id
     from trache.config import TracheConfig
 
-    out = get_output()
     cache_dir = _cache_dir()
     card_id = resolve_card_id(card_identifier, cache_dir)
 
@@ -40,7 +55,7 @@ def add(
     if out.is_human:
         out.human(f"[green]Comment added ({comment.id}) (API — posted immediately)[/green]")
     else:
-        out.json({"ok": True, "comment_id": comment.id})
+        out.json({"ok": True, "api_direct": True, "comment_id": comment.id})
 
 
 @comment_app.command("edit")
@@ -49,14 +64,29 @@ def edit(
     card_identifier: str = typer.Argument(help="Card ID or UID6"),
     comment_id: str = typer.Argument(help="Comment ID"),
     text: str = typer.Argument(help="New comment text"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Confirm API-direct action"),
 ) -> None:
     """Edit a comment on a card (updates immediately via API)."""
+    out = get_output()
+
+    if not yes:
+        if out.is_human:
+            out.human(
+                "[yellow]This will update immediately on Trello"
+                " (API-direct, not staged).[/yellow]"
+            )
+        else:
+            out.error(
+                "Comment commands are API-direct (not staged). "
+                "Pass --yes to confirm."
+            )
+            raise typer.Exit(1)
+
     from trache.api.auth import TrelloAuth
     from trache.api.client import TrelloClient
     from trache.cache.db import resolve_card_id
     from trache.config import TracheConfig
 
-    out = get_output()
     cache_dir = _cache_dir()
     card_id = resolve_card_id(card_identifier, cache_dir)
 
@@ -67,7 +97,7 @@ def edit(
     if out.is_human:
         out.human(f"[green]Comment updated ({comment.id}) (API — updated immediately)[/green]")
     else:
-        out.json({"ok": True, "comment_id": comment.id})
+        out.json({"ok": True, "api_direct": True, "comment_id": comment.id})
 
 
 @comment_app.command("delete")
@@ -81,7 +111,10 @@ def delete(
     out = get_output()
 
     if not yes:
-        out.error("Deletion is permanent. Pass --yes to confirm.")
+        out.error(
+            "Comment deletion is permanent and API-direct (not staged). "
+            "Pass --yes to confirm."
+        )
         raise typer.Exit(1)
 
     from trache.api.auth import TrelloAuth
@@ -99,7 +132,7 @@ def delete(
     if out.is_human:
         out.human(f"[green]Comment deleted ({comment_id}) (API — deleted immediately)[/green]")
     else:
-        out.json({"ok": True, "comment_id": comment_id})
+        out.json({"ok": True, "api_direct": True, "comment_id": comment_id})
 
 
 @comment_app.command("list")
@@ -127,11 +160,11 @@ def list_comments(
         if out.is_human:
             out.human("[dim]No comments (fetched from API)[/dim]")
         else:
-            out.json([])
+            out.json({"api_direct": True, "comments": []})
         return
 
     if not out.is_human:
-        out.json([
+        out.json({"api_direct": True, "comments": [
             {
                 "id": c.id,
                 "author": c.author,
@@ -139,7 +172,7 @@ def list_comments(
                 "text": c.text,
             }
             for c in comments
-        ])
+        ]})
         return
 
     if compact:

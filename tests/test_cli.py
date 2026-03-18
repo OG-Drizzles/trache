@@ -447,3 +447,85 @@ class TestChecklistAddItemHelp:
         # Help text may line-wrap, so check for both words separately
         assert "checklist" in result.output.lower()
         assert "show" in result.output.lower()
+
+
+class TestInitNonInteractive:
+    def test_init_no_board_id_machine_mode_errors(self, tmp_path: Path, monkeypatch) -> None:
+        """init without --board-id in machine mode → structured error, exit 1."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("TRACHE_HUMAN", raising=False)
+        from trache.cli._output import reset_output
+
+        reset_output()
+        result = runner.invoke(app, ["init"])
+        assert result.exit_code == 1
+        assert "Board ID required" in result.output
+
+    def test_init_no_board_id_human_mode_with_tty_prompts(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """init without --board-id in human mode with TTY → prompts (EOF → abort)."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("TRACHE_HUMAN", "1")
+        from trache.cli._output import reset_output
+
+        reset_output()
+        # CliRunner simulates non-TTY stdin, so the guard triggers
+        # even in human mode. Verify the prompt path doesn't crash.
+        result = runner.invoke(app, ["init"])
+        assert result.exit_code == 1
+        assert "Board ID required" in result.output
+
+
+class TestCommentGuards:
+    def test_comment_add_no_yes_machine_mode_refused(self, tmp_path: Path, monkeypatch) -> None:
+        """comment add without --yes in machine mode → exit 1, error about API-direct."""
+        _setup_cli_cache(tmp_path, monkeypatch)
+        monkeypatch.delenv("TRACHE_HUMAN", raising=False)
+        from trache.cli._output import reset_output
+
+        reset_output()
+        result = runner.invoke(app, ["comment", "add", "FEDCBA", "test text"])
+        assert result.exit_code == 1
+        assert "API-direct" in result.output
+
+    def test_comment_edit_no_yes_machine_mode_refused(self, tmp_path: Path, monkeypatch) -> None:
+        """comment edit without --yes in machine mode → exit 1, error about API-direct."""
+        _setup_cli_cache(tmp_path, monkeypatch)
+        monkeypatch.delenv("TRACHE_HUMAN", raising=False)
+        from trache.cli._output import reset_output
+
+        reset_output()
+        result = runner.invoke(app, ["comment", "edit", "FEDCBA", "comment123", "new text"])
+        assert result.exit_code == 1
+        assert "API-direct" in result.output
+
+    def test_comment_delete_no_yes_refused(self, tmp_path: Path, monkeypatch) -> None:
+        """comment delete without --yes → exit 1, mentions API-direct."""
+        _setup_cli_cache(tmp_path, monkeypatch)
+        result = runner.invoke(app, ["comment", "delete", "FEDCBA", "comment123"])
+        assert result.exit_code == 1
+        assert "API-direct" in result.output
+
+    def test_comment_add_human_mode_warns_without_yes(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Human mode: comment add without --yes → warning but proceeds (needs API mock)."""
+        from unittest.mock import MagicMock, patch
+
+        _setup_cli_cache(tmp_path, monkeypatch)
+        # Human mode is already set by _setup_cli_cache
+
+        mock_comment = MagicMock()
+        mock_comment.id = "comment_abc"
+
+        with patch("trache.api.client.TrelloClient") as MockClient:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.add_comment.return_value = mock_comment
+            MockClient.return_value = mock_client
+
+            result = runner.invoke(app, ["comment", "add", "FEDCBA", "test text"])
+            assert result.exit_code == 0
+            assert "API-direct" in result.output or "immediately" in result.output

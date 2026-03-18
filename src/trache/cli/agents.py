@@ -26,7 +26,7 @@ Default to read-only / inspect-first behaviour unless the user explicitly asks f
 **UID6:** Cards are referenced by UID6 — the last 6 characters of the Trello card ID (e.g. `A2CFF5`). Input is case-insensitive. Always use UID6, not full card IDs.
 
 - **Local-first:** all reads are local (no API calls). All edits happen locally. Nothing hits the API until `trache push`.
-- **Comments hit the API immediately** — they bypass local-first staging. Do not add/edit/delete comments without explicit user approval.
+- **Comments hit the API immediately** — they bypass local-first staging. Requires `--yes` flag. Do not add/edit/delete comments without explicit user approval.
 - **API-direct:** list mutations (`list create/rename/archive`) also hit the API immediately — no push needed.
 - Prefer targeted operations (`--card <uid6>`, `--list "Name"`) over full-board pull/push.
 - Always review changes with `trache status` and `trache diff` before pushing.
@@ -83,9 +83,9 @@ trache label delete "Name"
 trache list create "Name"               # create list (--pos top|bottom)
 trache list rename "Old" "New"          # rename list
 trache list archive "Name" --yes        # archive list (requires --yes)
-trache comment add <uid6> "Text"        # add comment
-trache comment edit <uid6> <comment_id> "Text"  # edit comment
-trache comment delete <uid6> <comment_id>       # delete comment
+trache comment add <uid6> "Text" --yes       # add comment (API-direct, --yes required in machine mode)
+trache comment edit <uid6> <comment_id> "Text" --yes  # edit comment (API-direct, --yes required)
+trache comment delete <uid6> <comment_id> --yes       # delete comment (API-direct, --yes required)
 
 ## Sync
 trache pull                             # full board pull
@@ -101,6 +101,8 @@ trache diff                             # detailed diff
 
 ## Caveats
 - **Comments and list mutations are NOT local-first** — `comment add/edit/delete`, `comment list`, and `list create/rename/archive` hit the Trello API immediately.
+- `comment add/edit/delete` require `--yes` in machine mode to prevent accidental API calls.
+- `comment list` JSON output returns `{"api_direct": true, "comments": [...]}` (not a bare array).
 - Every other command is local until you push.
 - Dirty pull guard: `trache pull` refuses if local changes exist. Use --force to override.
 - push = send local changes only. sync = push then full pull. Use sync only when a full refresh is actually wanted.
