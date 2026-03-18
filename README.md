@@ -176,9 +176,9 @@ All checklist mutations are local-first — push to sync.
 
 | Command | Description |
 |---|---|
-| `trache comment add <card> <text>` | Add a comment |
-| `trache comment edit <card> <comment_id> <text>` | Edit a comment |
-| `trache comment delete <card> <comment_id>` | Delete a comment |
+| `trache comment add <card> <text>` | Add a comment (`--yes` required in machine mode) |
+| `trache comment edit <card> <comment_id> <text>` | Edit a comment (`--yes` required in machine mode) |
+| `trache comment delete <card> <comment_id>` | Delete a comment (`--yes` required) |
 | `trache comment list <card>` | List comments |
 
 **All comment commands hit the Trello API immediately.** They bypass the local-first model entirely — there is no undo via `trache status` or `trache diff`.

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.2 — 2026-03-18
+
+Non-interactive safety: machine-mode guards for init, comment commands, and a hardened agent install block.
+
+### Non-Interactive Guards
+
+- **`trache init` without `--board-id`**: in machine mode or non-TTY stdin, emits a structured JSON error instead of hanging on an interactive prompt
+- **`trache comment add` / `comment edit`**: now require `--yes` in machine mode to prevent accidental API-direct writes; human mode prints a warning but proceeds
+- **`trache comment delete`**: error message updated for consistency with add/edit guard wording
+- **Comment JSON output**: all comment commands now include `api_direct: true` field; `comment list` wraps results in `{api_direct, comments}` object
+
+### Agent Install Block
+
+- **Rewritten `INSTALL_BLOCK_TEMPLATE`**: stronger MCP/API fallback guardrail, explicit pull/push/sync rule, read-only-by-default posture, UID6 explanation, prominent comment API-direct warning, actionable `agents --reference` directive, and a concrete example workflow
+- **Agent reference block**: updated to document `--yes` requirements for comment commands
+
+### Tests
+
+- 239 tests: new suites for init non-interactive guard (2) and comment command guards (4)
+
 ## 0.3.1 — 2026-03-17
 
 ### License
