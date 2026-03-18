@@ -12,18 +12,29 @@ from rich.panel import Panel
 INSTALL_BLOCK_TEMPLATE = """\
 ## Trache — Trello via local cache{board_line}
 
-Use `trache` for all Trello work. If trache can't do something, ask before using another method.
+Use `trache` for all Trello work. Do NOT fall back to Trello MCP or raw API calls. If trache cannot do it, stop and ask the user.
 User instructions always override this block.
+
+**Run `trache agents --reference` at the start of any session involving Trello work.**
+
+**Never pull, push, or sync unless the user explicitly asks.**
+
+Default to read-only / inspect-first behaviour unless the user explicitly asks for a write action.
 
 **Default workflow:** `card list` → `card show` → edit locally → `status` / `diff` → `push`
 
+**UID6:** Cards are referenced by UID6 — the last 6 characters of the Trello card ID (e.g. `A2CFF5`). Input is case-insensitive. Always use UID6, not full card IDs.
+
 - **Local-first:** all reads are local (no API calls). All edits happen locally. Nothing hits the API until `trache push`.
-- **API-direct:** list mutations (`list create/rename/archive`) and comment commands hit the API immediately — no push needed.
-- **Pull refreshes from Trello** — only pull when the user asks, same as push and sync.
+- **Comments hit the API immediately** — they bypass local-first staging. Do not add/edit/delete comments without explicit user approval.
+- **API-direct:** list mutations (`list create/rename/archive`) also hit the API immediately — no push needed.
 - Prefer targeted operations (`--card <uid6>`, `--list "Name"`) over full-board pull/push.
 - Always review changes with `trache status` and `trache diff` before pushing.
 - Do not commit `.trache/` to git.
-- For the full command cheatsheet, run `trache agents --reference`.
+
+Example — read a card, then add a comment (API-direct):
+  `trache card show A2CFF5`
+  `trache comment add A2CFF5 "Reviewed — looks good."`
 """
 
 REFERENCE_BLOCK = """\
