@@ -71,6 +71,10 @@ trache init --board-id <board_id>
 # or by URL:
 trache init --board-url https://trello.com/b/<board_id>/board-name
 
+# Add the install block to your AI instruction file, then acknowledge
+trache agents              # print the install block
+trache agents --ack        # confirm onboarding (required before pull/sync)
+
 # Pull board data
 trache pull
 
@@ -94,15 +98,17 @@ trache push               # push for real
 ## Core Workflow
 
 ```
-pull → discover → read → mutate → status/diff → push
+init → agents → agents --ack → pull → discover → read → mutate → status/diff → push
 ```
 
-1. **`trache pull`** — fetch board data from Trello into local cache
-2. **`trache card list`** — discover cards (reads local SQLite cache, no API call)
-3. **`trache card show <uid6>`** — read a single card (one local query)
-4. **Mutate locally** — edit title, description, labels, checklists, move, create, archive
-5. **`trache status`** / **`trache diff`** — review what changed
-6. **`trache push`** — push only the changed objects to Trello
+1. **`trache init`** — initialise cache for a board
+2. **`trache agents`** + **`trache agents --ack`** — add the install block to your AI instruction file, then acknowledge onboarding (gates `pull` and `sync`)
+3. **`trache pull`** — fetch board data from Trello into local cache
+4. **`trache card list`** — discover cards (reads local SQLite cache, no API call)
+5. **`trache card show <uid6>`** — read a single card (one local query)
+6. **Mutate locally** — edit title, description, labels, checklists, move, create, archive
+7. **`trache status`** / **`trache diff`** — review what changed
+8. **`trache push`** — push only the changed objects to Trello
 
 ## Things to Know
 
@@ -130,7 +136,7 @@ A few behaviours that aren't obvious from the happy path:
 | `trache status` | Show dirty state summary |
 | `trache diff` | Show detailed clean vs working diff |
 | `trache batch run` | Execute multiple commands from stdin (JSON output) |
-| `trache agents` | Print agent setup instructions (`--reference` for command cheat-sheet) |
+| `trache agents` | Print agent setup instructions (`--reference` for command cheat-sheet, `--ack` to confirm onboarding) |
 | `trache version` | Show installed version |
 
 ### Card Commands
@@ -288,7 +294,9 @@ make fmt
 Trache is built for Claude Code and similar AI coding agents.
 
 - **`trache agents`** — prints setup instructions for injecting trache into your agent's instruction files
+- **`trache agents --ack`** — acknowledges onboarding after the install block has been added; required before `pull` or `sync` will work
 - **`trache agents --reference`** — prints a compact command reference designed for agent context windows
+- **Onboarding gate** — after `init`, agents must run `agents` to get the install block, add it to their instruction file, then run `agents --ack` to unlock `pull`/`sync`. Existing boards that have already pulled are automatically grandfathered.
 - **Machine-first output** — default output is JSON/TSV for machine consumption; set `TRACHE_HUMAN=1` for Rich-formatted human output
 
 ## License

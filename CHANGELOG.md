@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.3 — 2026-03-19
+
+Onboarding ack gate: agents must acknowledge the install block before `pull`/`sync` are unlocked, preventing the common failure mode where agents parse init JSON for success signals and skip the install block entirely.
+
+### Onboarding Gate
+
+- **`trache agents --ack`**: new flag that sets `onboarding_acked = true` in `state.json` and unlocks `pull`/`sync`; mutually exclusive with `--reference`; outputs Rich confirmation (human) or `{"ok": true, "onboarding_acked": true}` (machine)
+- **`trache pull` / `trache sync` gated**: both commands now check `onboarding_acked` before proceeding; if false, exit 1 with guidance to run `trache agents` then `trache agents --ack`
+- **Grandfathering**: existing boards with a prior `last_pull` timestamp are auto-acked on `SyncState.load()` so they are not broken by the new gate
+- **`SyncState.onboarding_acked`**: new boolean field (default `false`) persisted in `state.json`
+
+### Init Output (Machine Mode)
+
+- **Removed `install_block` from JSON**: machine-mode `init` no longer embeds the install block as a JSON string field (agents were ignoring it)
+- **Added `next_step: "ACTION REQUIRED"`**: JSON payload now signals the agent to take action
+- **Stderr action notice**: plain-text `ACTION REQUIRED` block emitted to stderr with instructions to run `trache agents` and `trache agents --ack`
+
+### Tests
+
+- 248 tests: new `TestOnboardingAckGate` suite (9 tests) covering pull/sync blocking, ack persistence, machine-mode output, mutual exclusivity, grandfathering, and new-board behaviour; updated `test_init_machine_output` for new JSON shape
+
 ## 0.3.2 — 2026-03-18
 
 Non-interactive safety: machine-mode guards for init, comment commands, and a hardened agent install block.

@@ -44,13 +44,20 @@ class SyncState(BaseModel):
     last_pull: Optional[str] = None
     board_last_activity: Optional[str] = None
     card_timestamps: dict[str, str] = Field(default_factory=dict)
+    onboarding_acked: bool = False
 
     @classmethod
     def load(cls, cache_dir: Optional[Path] = None) -> SyncState:
         path = (cache_dir or Path(TRACHE_ROOT)) / "state.json"
         if not path.exists():
             return cls()
-        return cls.model_validate_json(path.read_text())
+        state = cls.model_validate_json(path.read_text())
+        # Grandfather existing boards: if they have pulled before but predate
+        # the ack gate, auto-ack so they are not broken.
+        if state.last_pull is not None and not state.onboarding_acked:
+            state.onboarding_acked = True
+            state.save(cache_dir)
+        return state
 
     def save(self, cache_dir: Optional[Path] = None) -> Path:
         from trache.cache._atomic import atomic_write

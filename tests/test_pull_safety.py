@@ -215,6 +215,13 @@ def _setup_sync_cli(tmp_path: Path, monkeypatch) -> Path:
     write_card(card, "clean", cache_dir)
     write_card(card, "working", cache_dir)
     seed_board([card], lists, cache_dir)
+
+    # Pre-ack onboarding so sync/pull gates don't block
+    from trache.config import SyncState
+
+    state = SyncState(onboarding_acked=True)
+    state.save(cache_dir)
+
     return cache_dir
 
 

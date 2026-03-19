@@ -322,19 +322,23 @@ class TestAgents:
         assert "copy below this line" not in result.output
         assert "Agent setup block" not in result.output
 
-    def test_init_machine_includes_install_block(self, tmp_path: Path, monkeypatch) -> None:
-        """Machine mode: init returns JSON with install_block field."""
+    def test_init_machine_output(self, tmp_path: Path, monkeypatch) -> None:
+        """Machine mode: init returns JSON with next_step, not install_block."""
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("TRELLO_API_KEY", "test_key")
         monkeypatch.setenv("TRELLO_TOKEN", "test_token")
 
         result = runner.invoke(app, ["init", "--board-id", "abc123def456789012345678"])
         import json
-        data = json.loads(result.output)
+        # First line is JSON on stdout; subsequent lines are stderr action notice
+        json_line = result.output.split("\n")[0]
+        data = json.loads(json_line)
         assert data["ok"] is True
-        assert "install_block" in data
-        assert "local-first" in data["install_block"].lower()
-        assert "trache agents --reference" in data["install_block"]
+        assert data["next_step"] == "ACTION REQUIRED"
+        assert "install_block" not in data
+        # Verify stderr action notice was emitted
+        assert "ACTION REQUIRED" in result.output
+        assert "trache agents --ack" in result.output
 
     def test_init_human_prints_agent_guidance(self, tmp_path: Path, monkeypatch) -> None:
         """Human mode: init prints Rich agent guidance panels."""
@@ -531,3 +535,123 @@ class TestCommentGuards:
             result = runner.invoke(app, ["comment", "add", "FEDCBA", "test text"])
             assert result.exit_code == 0
             assert "API-direct" in result.output or "immediately" in result.output
+
+
+def _setup_ack_cache(tmp_path: Path, monkeypatch, *, acked: bool = False) -> Path:
+    """Set up a .trache/ directory with configurable onboarding_acked state."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("TRELLO_API_KEY", "test_key")
+    monkeypatch.setenv("TRELLO_TOKEN", "test_token")
+    trache_root = tmp_path / ".trache"
+    trache_root.mkdir(exist_ok=True)
+    cache_dir = trache_root / "boards" / "test"
+    ensure_cache_structure(cache_dir)
+    config = TracheConfig(board_id="board1")
+    config.save(cache_dir)
+    (trache_root / "active").write_text("test\n")
+
+    from trache.config import SyncState
+
+    state = SyncState(onboarding_acked=acked)
+    state.save(cache_dir)
+    return cache_dir
+
+
+class TestOnboardingAckGate:
+    def test_pull_blocked_without_ack(self, tmp_path: Path, monkeypatch) -> None:
+        """pull without ack → exit 1, mentions agents --ack."""
+        _setup_ack_cache(tmp_path, monkeypatch, acked=False)
+        result = runner.invoke(app, ["pull"])
+        assert result.exit_code == 1
+        assert "agents --ack" in result.output
+
+    def test_sync_blocked_without_ack(self, tmp_path: Path, monkeypatch) -> None:
+        """sync without ack → exit 1, mentions agents --ack."""
+        _setup_ack_cache(tmp_path, monkeypatch, acked=False)
+        result = runner.invoke(app, ["sync"])
+        assert result.exit_code == 1
+        assert "agents --ack" in result.output
+
+    def test_pull_allowed_after_ack(self, tmp_path: Path, monkeypatch) -> None:
+        """With acked state, pull gate does not fire (may fail later on API, that's ok)."""
+        _setup_ack_cache(tmp_path, monkeypatch, acked=True)
+        result = runner.invoke(app, ["pull"])
+        # Should NOT be blocked by the ack gate — any other error is acceptable
+        assert "agents --ack" not in result.output
+
+    def test_agents_ack_persists_flag(self, tmp_path: Path, monkeypatch) -> None:
+        """agents --ack writes onboarding_acked=True to state.json."""
+        cache_dir = _setup_ack_cache(tmp_path, monkeypatch, acked=False)
+        result = runner.invoke(app, ["agents", "--ack"])
+        assert result.exit_code == 0
+
+        from trache.config import SyncState
+        import json
+
+        state_data = json.loads((cache_dir / "state.json").read_text())
+        assert state_data["onboarding_acked"] is True
+
+    def test_agents_ack_machine_mode(self, tmp_path: Path, monkeypatch) -> None:
+        """agents --ack in machine mode → JSON confirmation."""
+        _setup_ack_cache(tmp_path, monkeypatch, acked=False)
+        monkeypatch.delenv("TRACHE_HUMAN", raising=False)
+        from trache.cli._output import reset_output
+
+        reset_output()
+        result = runner.invoke(app, ["agents", "--ack"])
+        assert result.exit_code == 0
+        import json
+
+        data = json.loads(result.output)
+        assert data["ok"] is True
+        assert data["onboarding_acked"] is True
+
+    def test_agents_ack_and_reference_mutually_exclusive(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """agents --ack --reference → exit 1."""
+        _setup_ack_cache(tmp_path, monkeypatch, acked=False)
+        result = runner.invoke(app, ["agents", "--ack", "--reference"])
+        assert result.exit_code == 1
+
+    def test_grandfathering_existing_board(self, tmp_path: Path, monkeypatch) -> None:
+        """Old state.json with last_pull but no onboarding_acked → auto-acks on load."""
+        cache_dir = _setup_ack_cache(tmp_path, monkeypatch, acked=False)
+        import json
+
+        # Simulate old state.json with last_pull but no ack
+        state_path = cache_dir / "state.json"
+        state_data = json.loads(state_path.read_text())
+        state_data["last_pull"] = "2026-03-01T00:00:00Z"
+        state_data["onboarding_acked"] = False
+        state_path.write_text(json.dumps(state_data))
+
+        from trache.config import SyncState
+
+        state = SyncState.load(cache_dir)
+        assert state.onboarding_acked is True
+        # Verify it was persisted
+        reloaded = json.loads(state_path.read_text())
+        assert reloaded["onboarding_acked"] is True
+
+    def test_new_board_not_grandfathered(self, tmp_path: Path, monkeypatch) -> None:
+        """Fresh state.json (no last_pull) → onboarding_acked stays False."""
+        cache_dir = _setup_ack_cache(tmp_path, monkeypatch, acked=False)
+
+        from trache.config import SyncState
+
+        state = SyncState.load(cache_dir)
+        assert state.onboarding_acked is False
+
+    def test_pull_machine_mode_blocked_without_ack(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Machine mode: pull without ack → structured error on stderr."""
+        _setup_ack_cache(tmp_path, monkeypatch, acked=False)
+        monkeypatch.delenv("TRACHE_HUMAN", raising=False)
+        from trache.cli._output import reset_output
+
+        reset_output()
+        result = runner.invoke(app, ["pull"])
+        assert result.exit_code == 1
+        assert "agents --ack" in result.output

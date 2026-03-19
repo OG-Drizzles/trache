@@ -203,14 +203,15 @@ def init(
 
         print_init_agent_guidance(board_name=getattr(config, "board_name", None))
     else:
-        from trache.cli.agents import render_install_block
+        from trache.cli.agents import emit_machine_init_action_required
 
         out.json({
             "ok": True,
             "alias": alias,
             "board_id": config.board_id,
-            "install_block": render_install_block(board_name=getattr(config, "board_name", None)),
+            "next_step": "ACTION REQUIRED",
         })
+        emit_machine_init_action_required()
 
 
 @app.command()
@@ -226,6 +227,17 @@ def pull(
 
     out = get_output()
     cache_dir = resolve_cache_dir()
+
+    from trache.config import SyncState
+
+    state = SyncState.load(cache_dir)
+    if not state.onboarding_acked:
+        out.error(
+            "Onboarding not acknowledged. Run 'trache agents' and add the install block "
+            "to your AI instruction file, then run 'trache agents --ack'."
+        )
+        raise typer.Exit(1)
+
     client, config = _get_client(cache_dir)
 
     try:
@@ -512,6 +524,17 @@ def sync(
 
     out = get_output()
     cache_dir = resolve_cache_dir()
+
+    from trache.config import SyncState
+
+    state = SyncState.load(cache_dir)
+    if not state.onboarding_acked:
+        out.error(
+            "Onboarding not acknowledged. Run 'trache agents' and add the install block "
+            "to your AI instruction file, then run 'trache agents --ack'."
+        )
+        raise typer.Exit(1)
+
     client, config = _get_client(cache_dir)
 
     with client:
@@ -591,9 +614,33 @@ def agents(
     reference: bool = typer.Option(
         False, "--reference", help="Print on-demand command/workflow reference"
     ),
+    ack: bool = typer.Option(
+        False, "--ack", help="Acknowledge onboarding (install block added)"
+    ),
 ) -> None:
     """Print AI agent setup instructions or command reference."""
     from trache.cli.agents import print_install_block, print_reference_block
+
+    out = get_output()
+
+    if ack and reference:
+        out.error("Cannot use --ack with --reference")
+        raise typer.Exit(1)
+
+    if ack:
+        from trache.config import SyncState
+
+        cache_dir = resolve_cache_dir()
+        state = SyncState.load(cache_dir)
+        state.onboarding_acked = True
+        state.save(cache_dir)
+        if out.is_human:
+            from rich.console import Console
+
+            Console().print("[green]Onboarding acknowledged — pull/sync unlocked.[/green]")
+        else:
+            out.json({"ok": True, "onboarding_acked": True})
+        return
 
     if reference:
         print_reference_block()

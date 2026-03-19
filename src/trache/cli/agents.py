@@ -137,6 +137,21 @@ New list then create card in it:
   trache push
 """
 
+_MACHINE_INIT_ACTION_REQUIRED = """\
+ACTION REQUIRED: Add the trache install block to your AI instruction file.
+Run: trache agents
+Then add the output to CLAUDE.md, AGENTS.md, or equivalent after asking the user for permission.
+Run: trache agents --ack
+Once the block is added and the user has approved it."""
+
+
+def emit_machine_init_action_required() -> None:
+    """Write plain-text action-required notice to stderr (for machine-mode init)."""
+    import sys
+
+    print(_MACHINE_INIT_ACTION_REQUIRED, file=sys.stderr)
+
+
 def render_install_block(board_name: str | None = None) -> str:
     """Render the install block, optionally with board name."""
     board_line = f"\nBoard: {board_name} (initialised)" if board_name else ""
