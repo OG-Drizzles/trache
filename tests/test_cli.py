@@ -585,7 +585,6 @@ class TestOnboardingAckGate:
         result = runner.invoke(app, ["agents", "--ack"])
         assert result.exit_code == 0
 
-        from trache.config import SyncState
         import json
 
         state_data = json.loads((cache_dir / "state.json").read_text())
