@@ -515,6 +515,8 @@ class TestCommentGuards:
 
         _setup_cli_cache(tmp_path, monkeypatch)
         # Human mode is already set by _setup_cli_cache
+        monkeypatch.setenv("TRELLO_API_KEY", "dummy")
+        monkeypatch.setenv("TRELLO_TOKEN", "dummy")
 
         mock_comment = MagicMock()
         mock_comment.id = "comment_abc"
