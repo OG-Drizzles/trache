@@ -105,10 +105,7 @@ def _reset_board_override():
     yield
     from trache.cli import _context
 
-    if hasattr(_context, "_board_local"):
-        _context._board_local.override = None
-    else:
-        _context._active_board_override = None
+    _context._board_override = None
 
 
 @pytest.fixture(autouse=True)

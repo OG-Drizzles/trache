@@ -296,7 +296,7 @@ Trache is built for Claude Code and similar AI coding agents.
 - **`trache agents`** — prints setup instructions for injecting trache into your agent's instruction files
 - **`trache agents --ack`** — acknowledges onboarding after the install block has been added; required before `pull` or `sync` will work
 - **`trache agents --reference`** — prints a compact command reference designed for agent context windows
-- **Onboarding gate** — after `init`, agents must run `agents` to get the install block, add it to their instruction file, then run `agents --ack` to unlock `pull`/`sync`. Existing boards that have already pulled are automatically grandfathered.
+- **Onboarding gate** — after `init`, the onboarding gate must be explicitly acknowledged via `trache agents --ack` before `pull` or `sync` will work. There is no automatic grandfathering.
 - **Machine-first output** — default output is JSON/TSV for machine consumption; set `TRACHE_HUMAN=1` for Rich-formatted human output
 
 ## License

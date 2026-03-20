@@ -6,18 +6,18 @@ import json
 import re
 import shutil
 import sys
-import threading
 from pathlib import Path
 from typing import Optional
 
 TRACHE_ROOT = Path(".trache")
 
-_board_local = threading.local()
+_board_override: Optional[str] = None
 
 
 def set_board_override(name: Optional[str]) -> None:
     """Set the board override (from --board flag)."""
-    _board_local.override = name
+    global _board_override
+    _board_override = name
 
 
 def get_active_board_name() -> str:
@@ -66,7 +66,7 @@ def resolve_cache_dir() -> Path:
         _migrate_legacy()
 
     # Determine which board to use
-    override = getattr(_board_local, "override", None)
+    override = _board_override
     if override:
         name = override
     else:

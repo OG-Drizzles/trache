@@ -28,6 +28,7 @@ def _make_client(cards, lists=None, activity=None):
     client.get_board_cards.return_value = cards
     client.get_board_checklists.return_value = []
     client.get_board_labels.return_value = [Label(id="lbl1", name="bug", color="red")]
+    client.get_stats.return_value = {"calls": 0, "total_ms": 0.0}
     return client
 
 

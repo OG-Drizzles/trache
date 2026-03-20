@@ -146,17 +146,16 @@ def pull_full_board(
     # Atomic full-board write
     write_full_snapshot(cards, all_checklists, lists, label_models, cache_dir)
 
-    # Update sync state
-    state = SyncState(
-        last_pull=datetime.now(timezone.utc).isoformat(),
-        board_last_activity=(
-            board.date_last_activity.isoformat() if board.date_last_activity else None
-        ),
-        card_timestamps={
-            c.id: c.last_activity.isoformat() if c.last_activity else ""
-            for c in cards
-        },
+    # Update sync state (load-then-merge to preserve onboarding_acked and future fields)
+    state = SyncState.load(cache_dir)
+    state.last_pull = datetime.now(timezone.utc).isoformat()
+    state.board_last_activity = (
+        board.date_last_activity.isoformat() if board.date_last_activity else None
     )
+    state.card_timestamps = {
+        c.id: c.last_activity.isoformat() if c.last_activity else ""
+        for c in cards
+    }
     state.save(cache_dir)
 
     # Build list name lookup for summaries

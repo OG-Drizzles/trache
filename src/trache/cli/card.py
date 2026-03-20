@@ -112,7 +112,7 @@ def show_card(
 
     # List name
     list_display = resolve_list_name(card.list_id, cache_dir)
-    out.human(f"List: {list_display}")
+    out.human(f"List: {escape(list_display)}")
 
     # Status line
     status_parts = []
@@ -125,18 +125,18 @@ def show_card(
     out.human(f"Status: {' | '.join(status_parts)}")
 
     if card.labels:
-        out.human(f"Labels: {', '.join(card.labels)}")
+        out.human(f"Labels: {escape(', '.join(card.labels))}")
     if card.due:
         out.human(f"Due: {card.due}")
     out.human("")
     if card.description:
-        out.human(card.description)
+        out.human(escape(card.description))
     else:
         out.human("[dim]No description[/dim]")
     if card.checklists:
         out.human("")
         for cl in card.checklists:
-            out.human(f"[bold]{cl.name}[/bold]: {cl.complete}/{cl.total} complete")
+            out.human(f"[bold]{escape(cl.name)}[/bold]: {cl.complete}/{cl.total} complete")
             for item in cl.items:
                 check = "\\[x]" if item.state == "complete" else "\\[ ]"
                 out.human(f"  {check} {escape(item.name)} [dim]({item.id})[/dim]")

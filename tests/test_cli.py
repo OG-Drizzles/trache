@@ -613,12 +613,11 @@ class TestOnboardingAckGate:
         result = runner.invoke(app, ["agents", "--ack", "--reference"])
         assert result.exit_code == 1
 
-    def test_grandfathering_existing_board(self, tmp_path: Path, monkeypatch) -> None:
-        """Old state.json with last_pull but no onboarding_acked → auto-acks on load."""
+    def test_grandfather_clause_removed(self, tmp_path: Path, monkeypatch) -> None:
+        """SyncState.load() no longer auto-acks boards that predate the ack gate."""
         cache_dir = _setup_ack_cache(tmp_path, monkeypatch, acked=False)
         import json
 
-        # Simulate old state.json with last_pull but no ack
         state_path = cache_dir / "state.json"
         state_data = json.loads(state_path.read_text())
         state_data["last_pull"] = "2026-03-01T00:00:00Z"
@@ -628,10 +627,24 @@ class TestOnboardingAckGate:
         from trache.config import SyncState
 
         state = SyncState.load(cache_dir)
-        assert state.onboarding_acked is True
-        # Verify it was persisted
-        reloaded = json.loads(state_path.read_text())
-        assert reloaded["onboarding_acked"] is True
+        assert state.onboarding_acked is False
+
+    def test_non_acked_board_with_last_pull_still_blocked(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """After grandfather removal: board with last_pull but no ack is still blocked."""
+        cache_dir = _setup_ack_cache(tmp_path, monkeypatch, acked=False)
+        import json
+
+        state_path = cache_dir / "state.json"
+        state_data = json.loads(state_path.read_text())
+        state_data["last_pull"] = "2026-03-01T00:00:00Z"
+        state_data["onboarding_acked"] = False
+        state_path.write_text(json.dumps(state_data))
+
+        result = runner.invoke(app, ["pull"])
+        assert result.exit_code == 1
+        assert "agents" in result.output.lower() or "ack" in result.output.lower()
 
     def test_new_board_not_grandfathered(self, tmp_path: Path, monkeypatch) -> None:
         """Fresh state.json (no last_pull) → onboarding_acked stays False."""

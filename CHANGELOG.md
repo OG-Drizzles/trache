@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.3.4
+
+### Changed
+- **API stats are now per-client, not process-global.** `TrelloClient.get_stats()` replaces the module-level `get_api_stats()` / `reset_api_stats()` functions. Each client instance tracks its own call count and latency independently. _(F-001)_
+- **Onboarding grandfather clause removed (hard cutover).** `SyncState.load()` no longer auto-acks boards that predate the onboarding gate. Boards that have already been acked are unaffected. Any board that has not yet been acked must now run `trache agents --ack` explicitly. _(F-003)_
+
+### Fixed
+- **OutputWriter singleton** is now thread-safe via double-checked locking. _(F-002)_
+- **Board override** replaced `threading.local()` with plain module-level variable to eliminate `AttributeError` risk. _(F-007)_
+- **Rich markup injection** in `card show`, `checklist show`, and `comment list` — user-sourced text (descriptions, labels, checklist names, comment text) is now escaped to prevent mangled output from `[WIP]`, `[BLOCKED]`, etc. _(F-010)_
+
 ## 0.3.3 — 2026-03-19
 
 Onboarding ack gate: agents must acknowledge the install block before `pull`/`sync` are unlocked, preventing the common failure mode where agents parse init JSON for success signals and skip the install block entirely.

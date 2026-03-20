@@ -7,6 +7,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import typer
+from rich.markup import escape
 
 from trache.cli._errors import guard_archived, handle_resolve_errors
 from trache.cli._output import get_output
@@ -61,7 +62,7 @@ def create(
         pass
 
     if out.is_human:
-        out.human(f"[green]Checklist created: {name} ({temp_id}) — push to sync[/green]")
+        out.human(f"[green]Checklist created: {escape(name)} ({temp_id}) — push to sync[/green]")
     else:
         out.json({"ok": True, "name": name, "id": temp_id})
 
@@ -91,10 +92,10 @@ def show(
         return
 
     for cl in checklists:
-        out.human(f"\n[bold]{cl['name']}[/bold]")
+        out.human(f"\n[bold]{escape(cl['name'])}[/bold]")
         for item in cl.get("items", []):
             marker = "[green]x[/green]" if item["state"] == "complete" else "[ ]"
-            out.human(f"  {marker} {item['name']}  [dim]({item['id']})[/dim]")
+            out.human(f"  {marker} {escape(item['name'])}  [dim]({item['id']})[/dim]")
 
 
 @checklist_app.command("check")
@@ -175,7 +176,7 @@ def add_item(
     result = add_checklist_item(card_identifier, checklist_name, text, cache_dir)
 
     if out.is_human:
-        out.human(f"[green]Added: {text} ({result['item_id']}) — push to sync[/green]")
+        out.human(f"[green]Added: {escape(text)} ({result['item_id']}) — push to sync[/green]")
     else:
         out.json({"ok": True, "item_id": result["item_id"], "text": text})
 

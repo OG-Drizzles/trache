@@ -51,13 +51,7 @@ class SyncState(BaseModel):
         path = (cache_dir or Path(TRACHE_ROOT)) / "state.json"
         if not path.exists():
             return cls()
-        state = cls.model_validate_json(path.read_text())
-        # Grandfather existing boards: if they have pulled before but predate
-        # the ack gate, auto-ack so they are not broken.
-        if state.last_pull is not None and not state.onboarding_acked:
-            state.onboarding_acked = True
-            state.save(cache_dir)
-        return state
+        return cls.model_validate_json(path.read_text())
 
     def save(self, cache_dir: Optional[Path] = None) -> Path:
         from trache.cache._atomic import atomic_write

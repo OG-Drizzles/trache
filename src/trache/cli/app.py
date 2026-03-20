@@ -50,9 +50,6 @@ def main(
     ),
 ) -> None:
     """Local-first Trello cache with Git-style sync."""
-    from trache.api.client import reset_api_stats
-
-    reset_api_stats()
     set_board_override(board)
 
 
@@ -320,7 +317,7 @@ def pull(
         out.error(msg)
         raise typer.Exit(1)
 
-    out.api_stats()
+    out.api_stats(client)
 
 
 @app.command()
@@ -423,7 +420,7 @@ def stale() -> None:
             "remote_activity": result.remote_activity,
         })
 
-    out.api_stats()
+    out.api_stats(client)
 
 
 @app.command()
@@ -482,7 +479,7 @@ def push(
     for entry in result.archived:
         out.human(f"  - {escape(entry.title)} [{entry.uid6}]")
 
-    out.api_stats()
+    out.api_stats(client)
 
     if result.errors:
         for err in result.errors:
@@ -606,7 +603,7 @@ def sync(
     if not out.is_human:
         out.json({"ok": True, "dry_run": dry_run, "push": push_data, "pull": pull_data})
 
-    out.api_stats()
+    out.api_stats(client)
 
 
 @app.command()

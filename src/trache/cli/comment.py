@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
+from rich.markup import escape
 
 from trache.cli._errors import handle_resolve_errors
 from trache.cli._output import get_output
@@ -183,13 +184,13 @@ def list_comments(
             char_count = len(c.text)
             preview = c.text.replace("\n", " ")[:80]
             out.human(
-                f"  {date_str}  {author}  [{c.id}]  ({char_count} chars)  {preview}"
+                f"  {date_str}  {escape(author)}  [{c.id}]  ({char_count} chars)  {escape(preview)}"
             )
         return
 
     out.human(f"[dim]{len(comments)} comment(s) (fetched from API)[/dim]")
     for c in comments:
         date_str = c.created_at.strftime("%Y-%m-%d %H:%M") if c.created_at else "?"
-        out.human(f"[bold]{c.author}[/bold] ({date_str}) [dim][{c.id}][/dim]:")
-        out.human(f"  {c.text}")
+        out.human(f"[bold]{escape(c.author)}[/bold] ({date_str}) [dim][{c.id}][/dim]:")
+        out.human(f"  {escape(c.text)}")
         out.human("")

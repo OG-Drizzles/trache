@@ -6,7 +6,7 @@ import logging
 import random
 import time
 from datetime import datetime, timezone
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Callable, Optional, Protocol, TypeVar, runtime_checkable
 
 import httpx
 
@@ -30,28 +30,12 @@ _BASE_DELAY = 1.0
 
 logger = logging.getLogger(__name__)
 
-# Module-level API stats for observability
-_api_call_count: int = 0
-_api_total_ms: float = 0.0
 
+@runtime_checkable
+class HasStats(Protocol):
+    """Protocol for type-safe stats consumption."""
 
-def get_api_stats() -> dict[str, float]:
-    """Return current API call count and total latency in ms."""
-    return {"calls": _api_call_count, "total_ms": _api_total_ms}
-
-
-def reset_api_stats() -> None:
-    """Reset API call counters."""
-    global _api_call_count, _api_total_ms
-    _api_call_count = 0
-    _api_total_ms = 0.0
-
-
-def _track_call(elapsed_ms: float) -> None:
-    """Record an API call's latency."""
-    global _api_call_count, _api_total_ms
-    _api_call_count += 1
-    _api_total_ms += elapsed_ms
+    def get_stats(self) -> dict[str, float]: ...
 
 
 def _retry(fn: Callable[[], T]) -> T:
@@ -109,6 +93,8 @@ class TrelloClient:
     def __init__(self, auth: TrelloAuth, timeout: float = 30.0) -> None:
         self._auth = auth
         self._client = httpx.Client(base_url=BASE_URL, timeout=timeout)
+        self._call_count: int = 0
+        self._total_ms: float = 0.0
 
     def close(self) -> None:
         self._client.close()
@@ -125,13 +111,22 @@ class TrelloClient:
         except Exception:
             pass
 
+    def _track_call(self, elapsed_ms: float) -> None:
+        """Record an API call's latency."""
+        self._call_count += 1
+        self._total_ms += elapsed_ms
+
+    def get_stats(self) -> dict[str, float]:
+        """Return current API call count and total latency in ms."""
+        return {"calls": self._call_count, "total_ms": self._total_ms}
+
     def _get(self, path: str, params: Optional[dict] = None) -> Any:
         all_params = {**(params or {}), **self._auth.query_params}
 
         def _do() -> Any:
             t0 = time.monotonic()
             resp = self._client.get(path, params=all_params)
-            _track_call((time.monotonic() - t0) * 1000)
+            self._track_call((time.monotonic() - t0) * 1000)
             resp.raise_for_status()
             return resp.json()
 
@@ -143,7 +138,7 @@ class TrelloClient:
         def _do() -> Any:
             t0 = time.monotonic()
             resp = self._client.put(path, params=params, json=data or {})
-            _track_call((time.monotonic() - t0) * 1000)
+            self._track_call((time.monotonic() - t0) * 1000)
             resp.raise_for_status()
             return resp.json()
 
@@ -155,7 +150,7 @@ class TrelloClient:
         def _do() -> Any:
             t0 = time.monotonic()
             resp = self._client.post(path, params=params, json=data or {})
-            _track_call((time.monotonic() - t0) * 1000)
+            self._track_call((time.monotonic() - t0) * 1000)
             resp.raise_for_status()
             return resp.json()
 
@@ -165,7 +160,7 @@ class TrelloClient:
         def _do() -> None:
             t0 = time.monotonic()
             resp = self._client.delete(path, params=self._auth.query_params)
-            _track_call((time.monotonic() - t0) * 1000)
+            self._track_call((time.monotonic() - t0) * 1000)
             resp.raise_for_status()
 
         _retry(_do)

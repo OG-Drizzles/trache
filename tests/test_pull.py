@@ -82,6 +82,33 @@ class TestPullFullBoard:
         assert "Card Identifier" not in card.description
         assert "Actual description" in card.description
 
+    def test_pull_full_board_preserves_onboarding_acked(self, tmp_path: Path) -> None:
+        """pull_full_board must not overwrite onboarding_acked."""
+        cache_dir = tmp_path / ".trache"
+        ensure_cache_structure(cache_dir)
+        config = TracheConfig(board_id="board1")
+        config.save(cache_dir)
+
+        from trache.config import SyncState
+
+        state = SyncState(onboarding_acked=True)
+        state.save(cache_dir)
+
+        lists = [TrelloList(id="list1", name="To Do", board_id="board1", pos=1)]
+        cards = [
+            Card(
+                id="67abc123def4567890fedcba",
+                board_id="board1",
+                list_id="list1",
+                title="Card 1",
+            ),
+        ]
+        client = _make_mock_client(cards, lists)
+        pull_full_board(config, client, cache_dir)
+
+        after = SyncState.load(cache_dir)
+        assert after.onboarding_acked is True
+
 
 def _setup(tmp_path: Path) -> tuple[Path, TracheConfig]:
     cache_dir = tmp_path / ".trache"

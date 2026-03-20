@@ -9,12 +9,16 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 from typing import Optional
 
 from rich.console import Console
 from rich.table import Table
 
+from trache.api.client import HasStats
+
 _singleton: Optional[OutputWriter] = None
+_singleton_lock = threading.Lock()
 
 
 class OutputWriter:
@@ -56,11 +60,11 @@ class OutputWriter:
             payload = {"error": message, **extra}
             print(json.dumps(payload, separators=(",", ":"), default=str), file=sys.stderr)
 
-    def api_stats(self) -> None:
+    def api_stats(self, client: HasStats | None = None) -> None:
         """Emit API stats: human-readable to console, or JSON to stderr in machine mode."""
-        from trache.api.client import get_api_stats
-
-        stats = get_api_stats()
+        if client is None:
+            return
+        stats = client.get_stats()
         if stats["calls"] == 0:
             return
         if self._human:
@@ -82,12 +86,15 @@ def get_output() -> OutputWriter:
     """Module-level singleton, reads TRACHE_HUMAN on first call."""
     global _singleton
     if _singleton is None:
-        human = os.environ.get("TRACHE_HUMAN", "").strip() == "1"
-        _singleton = OutputWriter(human=human)
+        with _singleton_lock:
+            if _singleton is None:
+                human = os.environ.get("TRACHE_HUMAN", "").strip() == "1"
+                _singleton = OutputWriter(human=human)
     return _singleton
 
 
 def reset_output() -> None:
     """Reset singleton — for tests."""
     global _singleton
-    _singleton = None
+    with _singleton_lock:
+        _singleton = None

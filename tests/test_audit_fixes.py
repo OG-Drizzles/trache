@@ -143,3 +143,68 @@ class TestRepullFailureSurfaced:
 
         assert len(result.pushed) == 1
         assert any("Re-pull failed" in e for e in result.errors)
+
+
+class TestInstanceOwnedApiStats:
+    """F-001: API stats are per-client instance, not module-global."""
+
+    def test_fresh_client_starts_at_zero(self) -> None:
+        """New TrelloClient starts with zero stats."""
+        from trache.api.auth import TrelloAuth
+        from trache.api.client import TrelloClient
+
+        auth = MagicMock(spec=TrelloAuth)
+        auth.query_params = {"key": "k", "token": "t"}
+        client = TrelloClient(auth)
+        stats = client.get_stats()
+        assert stats["calls"] == 0
+        assert stats["total_ms"] == 0.0
+
+    def test_track_call_increments_correctly(self) -> None:
+        """_track_call accumulates count and latency."""
+        from trache.api.auth import TrelloAuth
+        from trache.api.client import TrelloClient
+
+        auth = MagicMock(spec=TrelloAuth)
+        auth.query_params = {"key": "k", "token": "t"}
+        client = TrelloClient(auth)
+        client._track_call(50.0)
+        client._track_call(50.0)
+        stats = client.get_stats()
+        assert stats["calls"] == 2
+        assert stats["total_ms"] == 100.0
+
+    def test_two_clients_have_independent_counters(self) -> None:
+        """Stats on client A do not affect client B."""
+        from trache.api.auth import TrelloAuth
+        from trache.api.client import TrelloClient
+
+        auth = MagicMock(spec=TrelloAuth)
+        auth.query_params = {"key": "k", "token": "t"}
+        client_a = TrelloClient(auth)
+        client_b = TrelloClient(auth)
+        client_a._track_call(99.0)
+        assert client_b.get_stats()["calls"] == 0
+        assert client_b.get_stats()["total_ms"] == 0.0
+
+    def test_output_api_stats_with_protocol(self, capsys) -> None:
+        """OutputWriter.api_stats renders stats from a HasStats-compliant object."""
+        from trache.cli._output import OutputWriter
+
+        class StubClient:
+            def get_stats(self) -> dict[str, float]:
+                return {"calls": 3, "total_ms": 150.0}
+
+        out = OutputWriter(human=True)
+        out.api_stats(StubClient())
+        captured = capsys.readouterr()
+        assert "3 API calls" in captured.out
+
+    def test_output_api_stats_none_is_silent(self, capsys) -> None:
+        """OutputWriter.api_stats(None) produces no output."""
+        from trache.cli._output import OutputWriter
+
+        out = OutputWriter(human=True)
+        out.api_stats(None)
+        captured = capsys.readouterr()
+        assert captured.out == ""
