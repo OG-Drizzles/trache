@@ -64,20 +64,72 @@ def _setup_cli_cache(tmp_path: Path, monkeypatch) -> Path:
 
 
 class TestInit:
-    def test_init_creates_cache_dir(self, tmp_path: Path, monkeypatch) -> None:
+    def test_init_success_path(self, tmp_path: Path, monkeypatch) -> None:
+        """Happy path: API reachable, board name fetched and stored."""
+        from unittest.mock import MagicMock
+
+        from trache.cache.models import Board
+        from trache.cli._output import reset_output
+
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("TRELLO_API_KEY", "test_key")
         monkeypatch.setenv("TRELLO_TOKEN", "test_token")
+        monkeypatch.setenv("TRACHE_HUMAN", "1")
+        reset_output()
+
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.get_current_member.return_value = {"fullName": "Test User"}
+        mock_client.get_board.return_value = Board(
+            id="abc123def456789012345678", name="My Board", url="",
+        )
+        monkeypatch.setattr(
+            "trache.api.client.TrelloClient", lambda *a, **kw: mock_client,
+        )
 
         result = runner.invoke(app, ["init", "--board-id", "abc123def456789012345678"])
-        assert result.exit_code == 0 or "Could not fetch board name" in result.output
-        assert (tmp_path / ".trache").exists()
+        assert result.exit_code == 0
+        assert "My Board" in result.output
         assert (tmp_path / ".trache" / "boards").exists()
-        # Config should exist under boards/<alias>/
         boards_dir = tmp_path / ".trache" / "boards"
         aliases = [d.name for d in boards_dir.iterdir() if d.is_dir()]
         assert len(aliases) == 1
         assert (boards_dir / aliases[0] / "config.json").exists()
+
+    def test_init_api_unreachable_graceful_degradation(self, tmp_path: Path, monkeypatch) -> None:
+        """API unreachable: init still succeeds with degraded board name."""
+        import json
+        from unittest.mock import MagicMock
+
+        from trache.cli._output import reset_output
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("TRELLO_API_KEY", "test_key")
+        monkeypatch.setenv("TRELLO_TOKEN", "test_token")
+        monkeypatch.setenv("TRACHE_HUMAN", "1")
+        reset_output()
+
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.get_current_member.return_value = {"fullName": "Test User"}
+        mock_client.get_board.side_effect = Exception("Connection refused")
+        monkeypatch.setattr(
+            "trache.api.client.TrelloClient", lambda *a, **kw: mock_client,
+        )
+
+        result = runner.invoke(app, ["init", "--board-id", "abc123def456789012345678"])
+        assert result.exit_code == 0
+        assert "Could not fetch board name" in result.output
+        assert (tmp_path / ".trache" / "boards").exists()
+        boards_dir = tmp_path / ".trache" / "boards"
+        aliases = [d.name for d in boards_dir.iterdir() if d.is_dir()]
+        assert len(aliases) == 1
+        config_path = boards_dir / aliases[0] / "config.json"
+        assert config_path.exists()
+        config_data = json.loads(config_path.read_text())
+        assert config_data.get("board_name", "") == ""
 
 
 class TestVersion:
@@ -87,8 +139,8 @@ class TestVersion:
         reset_output()
         result = runner.invoke(app, ["version"])
         assert result.exit_code == 0
-        versions = ["0.1.", "0.2.", "0.3."]
-        assert "trache " in result.output and any(v in result.output for v in versions)
+        from trache import __version__
+        assert f"trache {__version__}" in result.output
 
 
 class TestStatus:
@@ -744,3 +796,104 @@ class TestJsonFlag:
         result = runner.invoke(app, ["--json", "version"])
         assert result.exit_code == 0
         assert "\t" in result.output
+
+
+class TestStale:
+    def test_stale_human_board_is_stale(self, tmp_path: Path, monkeypatch) -> None:
+        """Human mode: stale board reports remote changes."""
+        from datetime import datetime, timezone
+        from unittest.mock import MagicMock
+
+        from trache.cache.models import Board
+        from trache.config import SyncState
+
+        cache_dir = _setup_cli_cache(tmp_path, monkeypatch)
+
+        old_ts = datetime(2026, 3, 15, 12, 0, 0, tzinfo=timezone.utc)
+        new_ts = datetime(2026, 3, 15, 14, 0, 0, tzinfo=timezone.utc)
+        state = SyncState(board_last_activity=old_ts.isoformat())
+        state.save(cache_dir)
+
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.get_board.return_value = Board(
+            id="board1", name="Test", url="", date_last_activity=new_ts,
+        )
+        mock_client.get_stats.return_value = {"calls": 1, "total_ms": 50}
+        mock_config = MagicMock(board_id="board1")
+
+        monkeypatch.setattr("trache.cli.app._get_client", lambda _: (mock_client, mock_config))
+        result = runner.invoke(app, ["stale"])
+        assert result.exit_code == 0
+        assert "remote changes" in result.output
+
+    def test_stale_human_board_up_to_date(self, tmp_path: Path, monkeypatch) -> None:
+        """Human mode: up-to-date board reports no changes."""
+        from datetime import datetime, timezone
+        from unittest.mock import MagicMock
+
+        from trache.cache.models import Board
+        from trache.config import SyncState
+
+        cache_dir = _setup_cli_cache(tmp_path, monkeypatch)
+
+        ts = datetime(2026, 3, 15, 12, 0, 0, tzinfo=timezone.utc)
+        state = SyncState(board_last_activity=ts.isoformat())
+        state.save(cache_dir)
+
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.get_board.return_value = Board(
+            id="board1", name="Test", url="", date_last_activity=ts,
+        )
+        mock_client.get_stats.return_value = {"calls": 1, "total_ms": 50}
+        mock_config = MagicMock(board_id="board1")
+
+        monkeypatch.setattr("trache.cli.app._get_client", lambda _: (mock_client, mock_config))
+        result = runner.invoke(app, ["stale"])
+        assert result.exit_code == 0
+        assert "up to date" in result.output
+
+    def test_stale_machine_json_output(self, tmp_path: Path, monkeypatch) -> None:
+        """Machine mode: stale outputs JSON with expected keys."""
+        import json
+        from datetime import datetime, timezone
+        from unittest.mock import MagicMock
+
+        from trache.cache.models import Board
+        from trache.cli._output import reset_output
+        from trache.config import SyncState
+
+        monkeypatch.delenv("TRACHE_HUMAN", raising=False)
+        reset_output()
+
+        cache_dir = _setup_cli_cache(tmp_path, monkeypatch)
+        # Re-set machine mode after _setup_cli_cache sets TRACHE_HUMAN=1
+        monkeypatch.delenv("TRACHE_HUMAN", raising=False)
+        reset_output()
+
+        old_ts = datetime(2026, 3, 15, 12, 0, 0, tzinfo=timezone.utc)
+        new_ts = datetime(2026, 3, 15, 14, 0, 0, tzinfo=timezone.utc)
+        state = SyncState(board_last_activity=old_ts.isoformat())
+        state.save(cache_dir)
+
+        mock_client = MagicMock()
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client.get_board.return_value = Board(
+            id="board1", name="Test", url="", date_last_activity=new_ts,
+        )
+        mock_client.get_stats.return_value = {"calls": 1, "total_ms": 50}
+        mock_config = MagicMock(board_id="board1")
+
+        monkeypatch.setattr("trache.cli.app._get_client", lambda _: (mock_client, mock_config))
+        result = runner.invoke(app, ["--json", "stale"])
+        assert result.exit_code == 0
+        # First line is the stale JSON; api_stats may follow on a second line
+        data = json.loads(result.output.splitlines()[0])
+        assert "stale" in data
+        assert "local_activity" in data
+        assert "remote_activity" in data
+        assert data["stale"] is True

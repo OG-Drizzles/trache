@@ -210,6 +210,28 @@ class TestInstanceOwnedApiStats:
         captured = capsys.readouterr()
         assert captured.out == ""
 
+    def test_output_api_stats_machine_mode_json(self, capsys) -> None:
+        """Machine mode: api_stats emits compact JSON to stderr with api_calls and api_ms keys."""
+        import json
+
+        from trache.cli._output import OutputWriter
+
+        class StubClient:
+            def get_stats(self) -> dict[str, float]:
+                return {"calls": 5, "total_ms": 250.0}
+
+        out = OutputWriter(human=False)
+        out.api_stats(StubClient())
+        captured = capsys.readouterr()
+        data = json.loads(captured.err)
+        assert isinstance(data["api_calls"], int)
+        assert isinstance(data["api_ms"], int)
+        assert data["api_calls"] == 5
+        assert data["api_ms"] == 250
+        assert captured.out == ""
+        # Verify compact JSON (no whitespace) per machine-output contract
+        assert captured.err.strip() == json.dumps(data, separators=(",", ":"))
+
 
 class TestParseTrelloDateLog:
     def test_malformed_date_emits_debug_log(self, caplog):

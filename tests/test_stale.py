@@ -64,3 +64,11 @@ class TestStalenessCheck:
         assert result.is_stale is True
         assert result.local_activity == t1.isoformat()
         assert result.remote_activity == t2.isoformat()
+
+    def test_stale_when_remote_activity_is_none(self, tmp_path: Path) -> None:
+        """Board with no dateLastActivity -> always stale."""
+        cache_dir, config = _setup(tmp_path)
+        client = _mock_client(activity=None)
+        result = check_staleness(config, client, cache_dir)
+        assert result.is_stale is True
+        assert result.remote_activity is None

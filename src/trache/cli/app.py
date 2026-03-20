@@ -56,6 +56,9 @@ def main(
     ),
 ) -> None:
     """Local-first Trello cache with Git-style sync."""
+    # CLI-only override: the root callback runs before command handlers, so the
+    # OutputWriter singleton is created after this env var is set. In-process
+    # library usage would need a different mechanism; tracked separately.
     if json_mode:
         os.environ["TRACHE_HUMAN"] = "0"
     set_board_override(board)

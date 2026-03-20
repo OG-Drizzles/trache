@@ -188,7 +188,7 @@ def health(
     # 1. Board config
     try:
         cache_dir = resolve_cache_dir()
-    except (FileNotFoundError, Exception) as e:
+    except Exception as e:
         checks.append({
             "name": "board_config",
             "status": "fail",
