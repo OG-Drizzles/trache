@@ -27,6 +27,7 @@ from trache.cli.board import board_app
 from trache.cli.card import card_app
 from trache.cli.checklist import checklist_app
 from trache.cli.comment import comment_app
+from trache.cli.health import health
 from trache.cli.label import label_app
 from trache.cli.list_cmd import list_app
 
@@ -42,6 +43,7 @@ app.add_typer(checklist_app, name="checklist", help="Checklist operations")
 app.add_typer(comment_app, name="comment", help="Comment operations")
 app.add_typer(label_app, name="label", help="Label operations")
 app.add_typer(list_app, name="list", help="List operations")
+app.command()(health)
 
 
 @app.callback()
@@ -49,8 +51,13 @@ def main(
     board: Optional[str] = typer.Option(
         None, "--board", "-B", help="Board alias to operate on"
     ),
+    json_mode: bool = typer.Option(
+        False, "--json", help="Force machine-readable JSON output"
+    ),
 ) -> None:
     """Local-first Trello cache with Git-style sync."""
+    if json_mode:
+        os.environ["TRACHE_HUMAN"] = "0"
     set_board_override(board)
 
 

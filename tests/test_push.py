@@ -416,3 +416,71 @@ class TestPushCardFilter:
 
         with pytest.raises(KeyError, match="Cannot resolve"):
             push_changes(config, client, cache_dir, card_filter="ZZZZZZ")
+
+
+class TestPushDescriptionOverflow:
+    """F-016: push-layer rendered-description and title validation."""
+
+    def _setup_cache(self, tmp_path: Path) -> tuple[Path, TracheConfig]:
+        cache_dir = tmp_path / ".trache"
+        ensure_cache_structure(cache_dir)
+        config = TracheConfig(board_id="board1")
+        config.save(cache_dir)
+        return cache_dir, config
+
+    def test_push_rejects_rendered_description_over_limit(
+        self, tmp_path: Path
+    ) -> None:
+        """Description that overflows 16384 after inject_block → error in result.errors."""
+        cache_dir, config = self._setup_cache(tmp_path)
+        from trache.cache.working import TRELLO_MAX_DESCRIPTION
+
+        # Use a description large enough that after identity block injection
+        # (~200 chars) the total exceeds 16384. Write directly to DB to bypass
+        # working-layer validation.
+        desc_len = TRELLO_MAX_DESCRIPTION - 100  # 16284 chars raw
+        original_desc = "y" * 100
+        card = Card(
+            id="67abc123def4567890fedcba",
+            board_id="board1",
+            list_id="list1",
+            title="Test Card",
+            description=original_desc,
+        )
+        write_card(card, "clean", cache_dir)
+        # Write oversized description directly to DB (bypasses working validators)
+        card.description = "x" * desc_len
+        card.dirty = True
+        write_card(card, "working", cache_dir)
+
+        client = MagicMock()
+        changeset, result = push_changes(config, client, cache_dir)
+
+        # Should have an error about description overflow
+        assert len(result.errors) == 1
+        assert "exceeds" in result.errors[0].lower() or "limit" in result.errors[0].lower()
+        client.update_card.assert_not_called()
+
+    def test_push_title_over_limit_rejected(self, tmp_path: Path) -> None:
+        """Oversized title written directly to DB → push catches it."""
+        cache_dir, config = self._setup_cache(tmp_path)
+        from trache.cache.working import TRELLO_MAX_TITLE
+
+        card = Card(
+            id="67abc123def4567890fedcba",
+            board_id="board1",
+            list_id="list1",
+            title="x" * (TRELLO_MAX_TITLE + 1),
+        )
+        write_card(card, "clean", cache_dir)
+        card.title = "x" * (TRELLO_MAX_TITLE + 1)
+        card.description = "changed"
+        card.dirty = True
+        write_card(card, "working", cache_dir)
+
+        client = MagicMock()
+        changeset, result = push_changes(config, client, cache_dir)
+
+        assert len(result.errors) == 1
+        assert "exceeds" in result.errors[0].lower() or "limit" in result.errors[0].lower()
+        client.update_card.assert_not_called()

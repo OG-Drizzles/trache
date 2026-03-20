@@ -8,7 +8,7 @@ import shutil
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator
+from typing import Callable, Generator
 
 from trache.cache._datetime import fmt_dt as _fmt_dt
 from trache.cache._datetime import parse_dt as _parse_dt
@@ -17,6 +17,13 @@ from trache.cache.models import Card, Checklist, ChecklistItem, Label, TrelloLis
 SCHEMA_VERSION = 1
 DB_FILENAME = "cache.db"
 MIGRATION_SENTINEL = "cache.db.migrated"
+
+# Migration functions keyed by TARGET version. Each receives an open connection
+# and runs DDL/DML to bring the schema from (key-1) to key. The version row is
+# updated by the runner — migrations must NOT touch schema_version themselves.
+_MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {
+    # 2: _migrate_v1_to_v2,
+}
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS lists (
@@ -160,12 +167,14 @@ def init_db(cache_dir: Path) -> None:
     if not has_db and has_files:
         # Migration path
         _create_schema(cache_dir)
+        _check_and_migrate(cache_dir)
         _migrate_files_to_db(cache_dir)
         sentinel.write_text("done\n")
         _cleanup_file_dirs(cache_dir)
         sentinel.unlink(missing_ok=True)
     else:
         _create_schema(cache_dir)
+        _check_and_migrate(cache_dir)
 
 
 def _create_schema(cache_dir: Path) -> None:
@@ -179,6 +188,51 @@ def _create_schema(cache_dir: Path) -> None:
                 "INSERT OR IGNORE INTO schema_version (version) VALUES (?)",
                 (SCHEMA_VERSION,),
             )
+
+
+def _run_migrations(conn: sqlite3.Connection) -> None:
+    """Apply pending schema migrations within the caller's transaction.
+
+    Reads current version, runs each registered migration in sequence up to
+    SCHEMA_VERSION. Bumps the version row after each successful step. Raises
+    RuntimeError on corrupt DB, future-version, or missing migration function.
+    """
+    row = conn.execute("SELECT version FROM schema_version").fetchone()
+    if not row:
+        raise RuntimeError(
+            "schema_version table is empty — database may be corrupt. "
+            "Delete cache.db and re-run 'trache pull'."
+        )
+    current = row[0]
+
+    if current > SCHEMA_VERSION:
+        raise RuntimeError(
+            f"Database schema version {current} is newer than this version of "
+            f"Trache (expects {SCHEMA_VERSION}). Upgrade Trache or delete cache.db."
+        )
+    if current == SCHEMA_VERSION:
+        return
+
+    for target in range(current + 1, SCHEMA_VERSION + 1):
+        migrate_fn = _MIGRATIONS.get(target)
+        if migrate_fn is None:
+            raise RuntimeError(
+                f"No migration registered for schema version {current} → {target}. "
+                f"This is a bug — please report it."
+            )
+        migrate_fn(conn)
+        conn.execute("UPDATE schema_version SET version = ?", (target,))
+
+
+def _check_and_migrate(cache_dir: Path) -> None:
+    """Run pending schema migrations in a fresh transaction.
+
+    Called AFTER _create_schema(). Uses its own connection because
+    executescript() in _create_schema auto-commits — migration needs a
+    separate transaction for correct rollback semantics.
+    """
+    with _connect(cache_dir) as conn:
+        _run_migrations(conn)
 
 
 def _cleanup_file_dirs(cache_dir: Path) -> None:

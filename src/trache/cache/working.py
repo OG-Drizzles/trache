@@ -19,6 +19,18 @@ from trache.cache.db import (
 )
 from trache.cache.models import Card
 
+# Trello API hard limits
+TRELLO_MAX_TITLE: int = 16_384
+TRELLO_MAX_DESCRIPTION: int = 16_384
+
+# Conservative identity-block overhead budget for the working-layer pre-check.
+# The actual block is ~160–200 chars + 2-char separator; 300 provides safe headroom
+# without requiring the working layer to simulate the render. This is intentionally
+# stricter than Trello's raw limit — the push layer performs the exact rendered-length
+# check against the real 16,384-char API limit after identity block injection.
+_IDENTITY_BLOCK_BUDGET: int = 300
+_EFFECTIVE_DESCRIPTION_LIMIT: int = TRELLO_MAX_DESCRIPTION - _IDENTITY_BLOCK_BUDGET
+
 
 class ChecklistMutator(Protocol):
     """Callback that mutates a checklists list in-place and returns a result dict."""
@@ -43,6 +55,7 @@ def list_working_cards(cache_dir: Path) -> list[Card]:
 
 def edit_title(identifier: str, new_title: str, cache_dir: Path) -> Card:
     """Edit a card's title in the working copy."""
+    _validate_title_length(new_title)
     card = read_working_card(identifier, cache_dir)
     card.title = new_title
     card.content_modified_at = _now()
@@ -53,6 +66,7 @@ def edit_title(identifier: str, new_title: str, cache_dir: Path) -> Card:
 
 def edit_description(identifier: str, new_desc: str, cache_dir: Path) -> Card:
     """Edit a card's description in the working copy."""
+    _validate_description_length(new_desc)
     card = read_working_card(identifier, cache_dir)
     card.description = new_desc
     card.content_modified_at = _now()
@@ -80,6 +94,9 @@ def create_card(
     description: str = "",
 ) -> Card:
     """Create a new card in the working copy."""
+    _validate_title_length(title)
+    if description:
+        _validate_description_length(description)
     list_id = resolve_list_id(list_identifier, cache_dir)
 
     temp_id = f"new_{uuid4().hex[:16]}t~"
@@ -127,6 +144,29 @@ def _validate_label(label_name: str, cache_dir: Path) -> None:
         f"Use `trache label list` to see all labels. "
         f"Use `trache label create` to add a new label."
     )
+
+
+def _validate_title_length(title: str) -> None:
+    """Raise ValueError if title exceeds Trello's character limit."""
+    length = len(title)
+    if length > TRELLO_MAX_TITLE:
+        excess = length - TRELLO_MAX_TITLE
+        raise ValueError(
+            f"Title too long: {length} chars (max {TRELLO_MAX_TITLE}). "
+            f"Shorten by {excess} chars."
+        )
+
+
+def _validate_description_length(description: str) -> None:
+    """Raise ValueError if description may overflow after identity block injection."""
+    length = len(description)
+    if length > _EFFECTIVE_DESCRIPTION_LIMIT:
+        excess = length - _EFFECTIVE_DESCRIPTION_LIMIT
+        raise ValueError(
+            f"Description too long: {length} chars "
+            f"(max {_EFFECTIVE_DESCRIPTION_LIMIT} after identity block overhead). "
+            f"Shorten by {excess} chars."
+        )
 
 
 def add_label(identifier: str, label_name: str, cache_dir: Path) -> tuple[Card, bool]:

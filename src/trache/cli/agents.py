@@ -108,6 +108,10 @@ trache diff                             # detailed diff
 - Dirty pull guard: `trache pull` refuses if local changes exist. Use --force to override.
 - push = send local changes only. sync = push then full pull. Use sync only when a full refresh is actually wanted.
 
+## Diagnostics
+- `trache health` — check config, DB schema, auth env vars, and API connectivity
+- `trache health --local` — skip API connectivity check (offline/local diagnostics only)
+
 ## Common workflows
 
 Batch edit then push:

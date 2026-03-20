@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.3.7 — 2026-03-20
+
+Final audit remediation: fail-closed comment guards, input length validation, `--json` flag, schema migration framework, and `trache health` diagnostic command.
+
+### Security
+
+- **Fail-closed comment confirmation** (F-013): `comment add`, `comment edit`, and `comment delete` now use a unified `_confirm_api_direct` guard — machine mode and non-TTY stdin always exit 1 without `--yes`; human mode with TTY prompts with default=No. The old warn-and-proceed path in human mode is removed. `comment delete` gains the `-y` alias for `--yes`.
+
+### Validation
+
+- **Input length validation** (F-016): `edit_title`, `edit_description`, and `create_card` now validate against Trello's 16,384-char API limit at the working layer. Descriptions are checked against a conservative 16,084-char limit (300-char identity block budget). Push layer performs a second check on the rendered description (with identity block injected) against the full 16,384-char limit.
+
+### Features
+
+- **`--json` CLI flag** (O-005): `trache --json <command>` forces machine-readable JSON output for a single invocation, overriding `TRACHE_HUMAN=1`.
+- **`trache health`** (O-008): 6-layer diagnostic probe checking board config, database schema, DB pragmas, auth env vars, API connectivity, and sync state. `--local` skips the API check. Exits 0 on all-pass, 1 on any failure. First-pull tip suggests running `trache health`.
+- **Schema migration framework** (O-011): `_MIGRATIONS` registry, `_run_migrations`, and `_check_and_migrate` in `db.py` — drives incremental DDL from `schema_version` table. Future schema changes register a migration function keyed by target version. Handles corrupt DB, future-version, and missing-migration errors.
+
+### Tests
+
+- Updated `TestCommentGuards`: human mode now asserts exit 1 (fail-closed); 3 new tests for edit/delete non-TTY and machine mode.
+- New `TestJsonFlag` (2 tests): `--json` forces machine output.
+- New `TestInputLengthValidation` (6 tests): title/description overflow and at-limit checks.
+- New `TestPushDescriptionOverflow` (2 tests): rendered description and title overflow at push time.
+- New `TestSchemaMigration` (5 tests): noop, future-version, apply-and-bump, rollback-on-failure, missing-migration.
+- New `tests/test_health.py` (9 tests): all-pass local, no config, bad schema, missing auth, API pass, API 401, machine output, exit code, `--local` skips API.
+
 ## 0.3.6 — 2026-03-20
 
 Audit batches 5–6 remediation: DB performance/resilience, datetime consolidation, and diff single-connection refactor.

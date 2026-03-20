@@ -16,6 +16,7 @@ from trache.cache.db import (
     write_labels_raw,
 )
 from trache.cache.diff import CardChange, Changeset, ChecklistChange, LabelChange, compute_diff
+from trache.cache.working import TRELLO_MAX_DESCRIPTION, TRELLO_MAX_TITLE
 from trache.config import TracheConfig
 from trache.identity import generate_block, inject_block
 from trache.sync.pull import pull_card
@@ -186,6 +187,7 @@ def _push_modified_card(
 ) -> None:
     """Push a modified card to Trello."""
     card = read_card(change.card_id, "working", cache_dir)
+    _push_validate_title(card.title)
 
     update_fields: dict = {}
 
@@ -200,7 +202,9 @@ def _push_modified_card(
             last_activity=card.last_activity,
             uid6=card.uid6,
         )
-        update_fields["desc"] = inject_block(card.description, block)
+        desc_rendered = inject_block(card.description, block)
+        _validate_rendered_description(desc_rendered, card.title, len(card.description))
+        update_fields["desc"] = desc_rendered
 
     if "list_id" in change.field_changes:
         update_fields["idList"] = card.list_id
@@ -226,6 +230,7 @@ def _push_modified_card(
                 uid6=card.uid6,
             )
             new_rendered = inject_block(card.description, block)
+            _validate_rendered_description(new_rendered, card.title, len(card.description))
 
             clean_card = read_card(change.card_id, "clean", cache_dir)
             clean_block = generate_block(
@@ -255,6 +260,7 @@ def _push_new_card(
 ) -> PushEntry:
     """Create a new card on Trello."""
     card = read_card(change.card_id, "working", cache_dir)
+    _push_validate_title(card.title)
 
     # Inject identifier block
     block = generate_block(
@@ -265,6 +271,7 @@ def _push_new_card(
         uid6=card.uid6,
     )
     desc_with_block = inject_block(card.description, block)
+    _validate_rendered_description(desc_with_block, card.title, len(card.description))
 
     new_card = client.create_card(card.list_id, card.title, desc_with_block)
 
@@ -416,5 +423,35 @@ def _resolve_label_ids(label_names: list[str], cache_dir: Path) -> list[str]:
                 f"Run 'trache pull' to refresh label data."
             )
     return resolved
+
+
+def _push_validate_title(title: str) -> None:
+    """Belt-and-suspenders title check at push time."""
+    if len(title) > TRELLO_MAX_TITLE:
+        raise ValueError(
+            f"Title '{title[:40]}...' is {len(title)} chars, "
+            f"exceeds Trello limit of {TRELLO_MAX_TITLE}."
+        )
+
+
+def _validate_rendered_description(
+    rendered: str, card_title: str, raw_len: int = 0
+) -> None:
+    """Raise ValueError if rendered description (with identity block) exceeds Trello limit."""
+    length = len(rendered)
+    if length > TRELLO_MAX_DESCRIPTION:
+        excess = length - TRELLO_MAX_DESCRIPTION
+        block_len = length - raw_len if raw_len else 0
+        block_note = (
+            f" The identity block added {block_len} chars to the "
+            f"{raw_len}-char raw description."
+            if block_len > 0
+            else ""
+        )
+        raise ValueError(
+            f"Rendered description for '{card_title}' exceeds Trello's "
+            f"{TRELLO_MAX_DESCRIPTION}-char limit ({length} chars).{block_note} "
+            f"Shorten the description by {excess} chars."
+        )
 
 

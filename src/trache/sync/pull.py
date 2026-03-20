@@ -115,6 +115,7 @@ def pull_full_board(
     board = client.get_board(board_id)
 
     # Stale check: skip full pull if board hasn't changed
+    was_first_pull = SyncState.load(cache_dir).last_pull is None
     if not force and board.date_last_activity is not None:
         state = SyncState.load(cache_dir)
         if (
@@ -157,6 +158,13 @@ def pull_full_board(
         for c in cards
     }
     state.save(cache_dir)
+
+    if was_first_pull:
+        from trache.cli._output import get_output
+
+        get_output().human(
+            "[dim]Tip: run 'trache health' to verify operational readiness.[/dim]"
+        )
 
     # Build list name lookup for summaries
     list_name_map = {lst.id: lst.name for lst in lists}

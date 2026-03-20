@@ -11,6 +11,8 @@ from trache.cache.db import read_card, resolve_card_id, write_card, write_checkl
 from trache.cache.diff import compute_diff
 from trache.cache.models import Card, TrelloList
 from trache.cache.working import (
+    _EFFECTIVE_DESCRIPTION_LIMIT,
+    TRELLO_MAX_TITLE,
     add_checklist_item,
     archive_card,
     check_checklist_item,
@@ -257,3 +259,66 @@ class TestCreateChecklist:
         create_checklist(sample_card.uid6, "Another CL", cache_dir)
         card = read_card(sample_card.id, "working", cache_dir)
         assert card.dirty is True
+
+
+class TestInputLengthValidation:
+    """F-016: input length validation at the working layer."""
+
+    def test_edit_title_too_long_raises(
+        self, sample_card: Card, sample_lists: list[TrelloList], cache_dir: Path
+    ) -> None:
+        write_card(sample_card, "clean", cache_dir)
+        write_card(sample_card, "working", cache_dir)
+        seed_board([sample_card], sample_lists, cache_dir)
+        with pytest.raises(ValueError, match="Title too long"):
+            edit_title(sample_card.uid6, "x" * (TRELLO_MAX_TITLE + 1), cache_dir)
+
+    def test_edit_description_too_long_raises(
+        self, sample_card: Card, sample_lists: list[TrelloList], cache_dir: Path
+    ) -> None:
+        write_card(sample_card, "clean", cache_dir)
+        write_card(sample_card, "working", cache_dir)
+        seed_board([sample_card], sample_lists, cache_dir)
+        with pytest.raises(ValueError, match="Description too long"):
+            edit_description(
+                sample_card.uid6, "x" * (_EFFECTIVE_DESCRIPTION_LIMIT + 1), cache_dir
+            )
+
+    def test_create_card_title_too_long_raises(
+        self, sample_lists: list[TrelloList], cache_dir: Path
+    ) -> None:
+        seed_board([], sample_lists, cache_dir)
+        with pytest.raises(ValueError, match="Title too long"):
+            create_card(
+                "To Do", "x" * (TRELLO_MAX_TITLE + 1), cache_dir, "board1"
+            )
+
+    def test_create_card_description_too_long_raises(
+        self, sample_lists: list[TrelloList], cache_dir: Path
+    ) -> None:
+        seed_board([], sample_lists, cache_dir)
+        with pytest.raises(ValueError, match="Description too long"):
+            create_card(
+                "To Do", "OK Title", cache_dir, "board1",
+                description="x" * (_EFFECTIVE_DESCRIPTION_LIMIT + 1),
+            )
+
+    def test_edit_title_at_limit_passes(
+        self, sample_card: Card, sample_lists: list[TrelloList], cache_dir: Path
+    ) -> None:
+        write_card(sample_card, "clean", cache_dir)
+        write_card(sample_card, "working", cache_dir)
+        seed_board([sample_card], sample_lists, cache_dir)
+        card = edit_title(sample_card.uid6, "x" * TRELLO_MAX_TITLE, cache_dir)
+        assert len(card.title) == TRELLO_MAX_TITLE
+
+    def test_edit_description_at_limit_passes(
+        self, sample_card: Card, sample_lists: list[TrelloList], cache_dir: Path
+    ) -> None:
+        write_card(sample_card, "clean", cache_dir)
+        write_card(sample_card, "working", cache_dir)
+        seed_board([sample_card], sample_lists, cache_dir)
+        card = edit_description(
+            sample_card.uid6, "x" * _EFFECTIVE_DESCRIPTION_LIMIT, cache_dir
+        )
+        assert len(card.description) == _EFFECTIVE_DESCRIPTION_LIMIT

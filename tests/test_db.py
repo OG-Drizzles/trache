@@ -609,3 +609,99 @@ class TestConnectionPragmas:
         with pytest.raises(ValueError, match="positive integer"):
             with connect(db_dir) as _conn:
                 pass
+
+
+# ---------------------------------------------------------------------------
+# Schema migration framework (O-011)
+# ---------------------------------------------------------------------------
+
+
+class TestSchemaMigration:
+    def test_migration_runner_noop_when_current(self, tmp_path: Path) -> None:
+        """Fresh DB at SCHEMA_VERSION — _check_and_migrate is a noop."""
+        import trache.cache.db as db_module
+
+        d = tmp_path / "board"
+        init_db(d)
+        # Should not raise
+        db_module._check_and_migrate(d)
+        with connect(d) as conn:
+            row = conn.execute("SELECT version FROM schema_version").fetchone()
+        assert row[0] == db_module.SCHEMA_VERSION
+
+    def test_future_version_raises(self, tmp_path: Path) -> None:
+        """DB at version 999 → RuntimeError."""
+        import trache.cache.db as db_module
+
+        d = tmp_path / "board"
+        init_db(d)
+        with connect(d) as conn:
+            conn.execute("UPDATE schema_version SET version = 999")
+        with pytest.raises(RuntimeError, match="newer than this version"):
+            db_module._check_and_migrate(d)
+
+    def test_migration_applies_and_bumps_version(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Create DB at v1, monkeypatch to v2, verify migration runs."""
+        import trache.cache.db as db_module
+
+        d = tmp_path / "board"
+        init_db(d)  # Creates at SCHEMA_VERSION=1
+
+        def _migrate_v1_to_v2(conn):
+            conn.execute("ALTER TABLE lists ADD COLUMN test_col TEXT DEFAULT ''")
+
+        monkeypatch.setattr(db_module, "SCHEMA_VERSION", 2)
+        monkeypatch.setattr(db_module, "_MIGRATIONS", {2: _migrate_v1_to_v2})
+
+        db_module._check_and_migrate(d)
+
+        with connect(d) as conn:
+            row = conn.execute("SELECT version FROM schema_version").fetchone()
+            assert row[0] == 2
+            # Verify the column was added
+            info = conn.execute("PRAGMA table_info(lists)").fetchall()
+            col_names = [r[1] for r in info]
+            assert "test_col" in col_names
+
+    def test_migration_rollback_on_failure(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Migration that raises → version stays at 1."""
+        import trache.cache.db as db_module
+
+        d = tmp_path / "board"
+        init_db(d)
+
+        def _bad_migration(conn):
+            raise RuntimeError("intentional failure")
+
+        monkeypatch.setattr(db_module, "SCHEMA_VERSION", 2)
+        monkeypatch.setattr(db_module, "_MIGRATIONS", {2: _bad_migration})
+
+        with pytest.raises(RuntimeError, match="intentional failure"):
+            db_module._check_and_migrate(d)
+
+        # Version must still be 1 (rollback)
+        with connect(d) as conn:
+            row = conn.execute("SELECT version FROM schema_version").fetchone()
+            assert row[0] == 1
+
+    def test_missing_migration_raises(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """SCHEMA_VERSION=3 with only v2 migration → RuntimeError on v3."""
+        import trache.cache.db as db_module
+
+        d = tmp_path / "board"
+        init_db(d)
+
+        def _migrate_v1_to_v2(conn):
+            conn.execute("ALTER TABLE lists ADD COLUMN test_col TEXT DEFAULT ''")
+
+        monkeypatch.setattr(db_module, "SCHEMA_VERSION", 3)
+        monkeypatch.setattr(db_module, "_MIGRATIONS", {2: _migrate_v1_to_v2})
+
+        with pytest.raises(RuntimeError, match="No migration registered"):
+            db_module._check_and_migrate(d)

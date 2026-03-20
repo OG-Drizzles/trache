@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import typer
@@ -18,6 +19,39 @@ def _cache_dir() -> Path:
     return resolve_cache_dir()
 
 
+def _confirm_api_direct(out, action_description: str) -> None:
+    """Fail-closed confirmation guard for API-direct comment commands.
+
+    - Machine mode: always exit 1 (pass --yes to bypass).
+    - Human mode + non-TTY stdin: exit 1 (cannot prompt).
+    - Human mode + TTY: typer.confirm() with default=No; No/Abort/EOF/Ctrl-C all exit 1.
+    """
+    if not out.is_human:
+        out.error(
+            "Comment commands are API-direct (not staged). "
+            "Pass --yes to confirm."
+        )
+        raise typer.Exit(1)
+
+    if not sys.stdin.isatty():
+        out.error(
+            "Comment commands are API-direct (not staged). "
+            "Pass --yes to confirm, or run in an interactive terminal."
+        )
+        raise typer.Exit(1)
+
+    try:
+        confirmed = typer.confirm(
+            f"This will {action_description} immediately on Trello "
+            "(API-direct, not staged). Proceed?",
+            default=False,
+        )
+    except (typer.Abort, EOFError, KeyboardInterrupt):
+        raise typer.Exit(1)
+    if not confirmed:
+        raise typer.Exit(1)
+
+
 @comment_app.command("add")
 @handle_resolve_errors
 def add(
@@ -29,17 +63,7 @@ def add(
     out = get_output()
 
     if not yes:
-        if out.is_human:
-            out.human(
-                "[yellow]This will post immediately to Trello"
-                " (API-direct, not staged).[/yellow]"
-            )
-        else:
-            out.error(
-                "Comment commands are API-direct (not staged). "
-                "Pass --yes to confirm."
-            )
-            raise typer.Exit(1)
+        _confirm_api_direct(out, "post this comment")
 
     from trache.cache.db import resolve_card_id
     from trache.cli._context import get_client_and_config
@@ -67,17 +91,7 @@ def edit(
     out = get_output()
 
     if not yes:
-        if out.is_human:
-            out.human(
-                "[yellow]This will update immediately on Trello"
-                " (API-direct, not staged).[/yellow]"
-            )
-        else:
-            out.error(
-                "Comment commands are API-direct (not staged). "
-                "Pass --yes to confirm."
-            )
-            raise typer.Exit(1)
+        _confirm_api_direct(out, "update this comment")
 
     from trache.cache.db import resolve_card_id
     from trache.cli._context import get_client_and_config
@@ -98,17 +112,13 @@ def edit(
 def delete(
     card_identifier: str = typer.Argument(help="Card ID or UID6"),
     comment_id: str = typer.Argument(help="Comment ID"),
-    yes: bool = typer.Option(False, "--yes", help="Confirm deletion"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Confirm deletion"),
 ) -> None:
     """Delete a comment on a card (deletes immediately via API)."""
     out = get_output()
 
     if not yes:
-        out.error(
-            "Comment deletion is permanent and API-direct (not staged). "
-            "Pass --yes to confirm."
-        )
-        raise typer.Exit(1)
+        _confirm_api_direct(out, "delete this comment permanently")
 
     from trache.cache.db import resolve_card_id
     from trache.cli._context import get_client_and_config

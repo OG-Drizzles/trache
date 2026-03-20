@@ -514,27 +514,44 @@ class TestCommentGuards:
     def test_comment_add_human_mode_warns_without_yes(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        """Human mode: comment add without --yes → warning but proceeds (needs API mock)."""
-        from unittest.mock import MagicMock, patch
-
+        """Human mode + non-TTY: comment add without --yes → exit 1 (fail-closed)."""
         _setup_cli_cache(tmp_path, monkeypatch)
-        # Human mode is already set by _setup_cli_cache
         monkeypatch.setenv("TRELLO_API_KEY", "dummy")
         monkeypatch.setenv("TRELLO_TOKEN", "dummy")
+        result = runner.invoke(app, ["comment", "add", "FEDCBA", "test text"])
+        assert result.exit_code == 1
+        assert "API-direct" in result.output
 
-        mock_comment = MagicMock()
-        mock_comment.id = "comment_abc"
+    def test_comment_edit_human_mode_non_tty_refused(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Human mode + non-TTY: comment edit without --yes → exit 1."""
+        _setup_cli_cache(tmp_path, monkeypatch)
+        monkeypatch.setenv("TRELLO_API_KEY", "dummy")
+        monkeypatch.setenv("TRELLO_TOKEN", "dummy")
+        result = runner.invoke(app, ["comment", "edit", "FEDCBA", "cid", "new"])
+        assert result.exit_code == 1
+        assert "API-direct" in result.output
 
-        with patch("trache.api.client.TrelloClient") as MockClient:
-            mock_client = MagicMock()
-            mock_client.__enter__ = MagicMock(return_value=mock_client)
-            mock_client.__exit__ = MagicMock(return_value=False)
-            mock_client.add_comment.return_value = mock_comment
-            MockClient.return_value = mock_client
+    def test_comment_delete_human_mode_non_tty_refused(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """delete now uses _confirm_api_direct; non-TTY → exit 1."""
+        _setup_cli_cache(tmp_path, monkeypatch)
+        result = runner.invoke(app, ["comment", "delete", "FEDCBA", "cid"])
+        assert result.exit_code == 1
+        assert "API-direct" in result.output
 
-            result = runner.invoke(app, ["comment", "add", "FEDCBA", "test text"])
-            assert result.exit_code == 0
-            assert "API-direct" in result.output or "immediately" in result.output
+    def test_comment_delete_machine_mode_refused(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Machine mode: delete without --yes → exit 1."""
+        _setup_cli_cache(tmp_path, monkeypatch)
+        monkeypatch.setenv("TRACHE_HUMAN", "0")
+        from trache.cli._output import reset_output
+        reset_output()
+        result = runner.invoke(app, ["comment", "delete", "FEDCBA", "cid"])
+        assert result.exit_code == 1
 
 
 def _setup_ack_cache(tmp_path: Path, monkeypatch, *, acked: bool = False) -> Path:
@@ -706,3 +723,24 @@ class TestStatusBoardContext:
         result = runner.invoke(app, ["status"])
         assert result.exit_code == 1
         assert "not found" in result.output.lower()
+
+
+class TestJsonFlag:
+    def test_json_flag_forces_machine_mode(self, tmp_path: Path, monkeypatch) -> None:
+        """TRACHE_HUMAN=1 + --json → machine output (version as TSV)."""
+        monkeypatch.setenv("TRACHE_HUMAN", "1")
+        from trache.cli._output import reset_output
+        reset_output()
+        result = runner.invoke(app, ["--json", "version"])
+        assert result.exit_code == 0
+        # Machine mode version outputs TSV, not "trache 0.x.y"
+        assert "\t" in result.output
+
+    def test_json_flag_without_human_env(self, tmp_path: Path, monkeypatch) -> None:
+        """No TRACHE_HUMAN + --json → still machine."""
+        monkeypatch.delenv("TRACHE_HUMAN", raising=False)
+        from trache.cli._output import reset_output
+        reset_output()
+        result = runner.invoke(app, ["--json", "version"])
+        assert result.exit_code == 0
+        assert "\t" in result.output
