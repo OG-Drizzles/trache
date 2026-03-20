@@ -44,7 +44,14 @@ class Checklist(BaseModel):
 
 
 class Card(BaseModel):
-    """Trello card — core cache object."""
+    """Trello card — core cache object.
+
+    Note on ``content_modified_at``: on first pull this equals ``last_activity``
+    because the Trello API only exposes ``dateLastActivity`` (which includes
+    comments, moves, and member changes — not just content edits). After the
+    first pull, the local ``_preserve_content_modified_at()`` heuristic diverges
+    the two fields by comparing content before overwriting. See F-009.
+    """
 
     id: str
     uid6: str = ""  # Last 6 chars of card ID (uppercase)
@@ -53,7 +60,7 @@ class Card(BaseModel):
     title: str = ""
     description: str = ""
     created_at: Optional[datetime] = None
-    content_modified_at: Optional[datetime] = None
+    content_modified_at: Optional[datetime] = None  # approximate on first pull; see docstring
     last_activity: Optional[datetime] = None
     due: Optional[datetime] = None
     labels: list[str] = Field(default_factory=list)
