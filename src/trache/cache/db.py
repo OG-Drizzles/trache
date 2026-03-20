@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator, Optional
+from typing import Generator
 
+from trache.cache._datetime import fmt_dt as _fmt_dt
+from trache.cache._datetime import parse_dt as _parse_dt
 from trache.cache.models import Card, Checklist, ChecklistItem, Label, TrelloList
 
 SCHEMA_VERSION = 1
@@ -93,11 +96,29 @@ def _db_path(cache_dir: Path) -> Path:
 
 @contextmanager
 def _connect(cache_dir: Path) -> Generator[sqlite3.Connection, None, None]:
-    """Open a SQLite connection with WAL mode. Commits on success, rolls back on error."""
+    """Open a SQLite connection with WAL mode, NORMAL sync, and configurable busy timeout.
+
+    Commits on success, rolls back on error.
+    Env: TRACHE_DB_BUSY_TIMEOUT (ms, default 10000). Must be a positive integer.
+    """
     path = _db_path(cache_dir)
+    raw_timeout = os.environ.get("TRACHE_DB_BUSY_TIMEOUT", "10000")
+    try:
+        busy_timeout = int(raw_timeout)
+    except ValueError:
+        raise ValueError(
+            f"TRACHE_DB_BUSY_TIMEOUT must be a positive integer (milliseconds), "
+            f"got: {raw_timeout!r}"
+        )
+    if busy_timeout <= 0:
+        raise ValueError(
+            f"TRACHE_DB_BUSY_TIMEOUT must be a positive integer (milliseconds), got: {busy_timeout}"
+        )
     conn = sqlite3.connect(str(path), isolation_level="DEFERRED")
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute(f"PRAGMA busy_timeout={busy_timeout}")
     conn.row_factory = sqlite3.Row
     try:
         yield conn
@@ -219,28 +240,13 @@ def _migrate_files_to_db(cache_dir: Path) -> None:
 # Card serialisation helpers
 # ---------------------------------------------------------------------------
 
-
-def _fmt_dt(dt) -> Optional[str]:
-    """Format a datetime to ISO string, or return None/str as-is."""
-    if dt is None:
-        return None
-    if isinstance(dt, str):
-        return dt
-    if dt.tzinfo is not None and dt.utcoffset() is not None:
-        from datetime import timezone
-
-        if dt.utcoffset().total_seconds() != 0:
-            dt = dt.astimezone(timezone.utc)
-    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def _parse_dt(val: Optional[str]):
-    """Parse an ISO datetime string. Returns datetime or None."""
-    if val is None:
-        return None
-    from trache.cache.store import _parse_dt as store_parse_dt
-
-    return store_parse_dt(val)
+_INSERT_CARD_SQL = (
+    "INSERT OR REPLACE INTO cards"
+    " (id, copy, uid6, board_id, list_id, title, description,"
+    "  created_at, content_modified_at, last_activity, due,"
+    "  labels, members, closed, dirty, pos)"
+    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+)
 
 
 def _card_to_row(card: Card, copy: str) -> tuple:
@@ -288,14 +294,7 @@ def _row_to_card(row: sqlite3.Row) -> Card:
 
 def _insert_card(conn: sqlite3.Connection, card: Card, copy: str) -> None:
     """Insert or replace a card row."""
-    conn.execute(
-        """INSERT OR REPLACE INTO cards
-           (id, copy, uid6, board_id, list_id, title, description,
-            created_at, content_modified_at, last_activity, due,
-            labels, members, closed, dirty, pos)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        _card_to_row(card, copy),
-    )
+    conn.execute(_INSERT_CARD_SQL, _card_to_row(card, copy))
 
 
 def _insert_checklists_raw(
@@ -339,8 +338,7 @@ def write_card(card: Card, copy: str, cache_dir: Path) -> None:
 def write_cards_batch(cards: list[Card], copy: str, cache_dir: Path) -> None:
     """Write multiple cards in a single transaction."""
     with _connect(cache_dir) as conn:
-        for card in cards:
-            _insert_card(conn, card, copy)
+        conn.executemany(_INSERT_CARD_SQL, [_card_to_row(c, copy) for c in cards])
 
 
 def read_card(card_id: str, copy: str, cache_dir: Path) -> Card:
@@ -354,13 +352,17 @@ def read_card(card_id: str, copy: str, cache_dir: Path) -> Card:
     return _row_to_card(row)
 
 
+def _list_cards_conn(conn: sqlite3.Connection, copy: str) -> list[Card]:
+    rows = conn.execute(
+        "SELECT * FROM cards WHERE copy = ? ORDER BY pos, id", (copy,)
+    ).fetchall()
+    return [_row_to_card(r) for r in rows]
+
+
 def list_cards(copy: str, cache_dir: Path) -> list[Card]:
     """List all cards for a given copy type."""
     with _connect(cache_dir) as conn:
-        rows = conn.execute(
-            "SELECT * FROM cards WHERE copy = ? ORDER BY pos, id", (copy,)
-        ).fetchall()
-    return [_row_to_card(r) for r in rows]
+        return _list_cards_conn(conn, copy)
 
 
 def delete_card(card_id: str, copy: str, cache_dir: Path) -> None:
@@ -463,41 +465,46 @@ def write_checklists_raw(
         _insert_checklists_raw(conn, card_id, checklists, copy)
 
 
+def _read_checklists_conn(
+    conn: sqlite3.Connection, card_id: str, copy: str
+) -> list[Checklist]:
+    cl_rows = conn.execute(
+        "SELECT * FROM checklists WHERE card_id = ? AND copy = ? ORDER BY pos, id",
+        (card_id, copy),
+    ).fetchall()
+    result: list[Checklist] = []
+    for cl_row in cl_rows:
+        items_rows = conn.execute(
+            """SELECT * FROM checklist_items
+               WHERE checklist_id = ? AND card_id = ? AND copy = ?
+               ORDER BY pos, id""",
+            (cl_row["id"], card_id, copy),
+        ).fetchall()
+        items = [
+            ChecklistItem(
+                id=ir["id"],
+                name=ir["name"],
+                state=ir["state"],
+                pos=ir["pos"],
+            )
+            for ir in items_rows
+        ]
+        result.append(
+            Checklist(
+                id=cl_row["id"],
+                name=cl_row["name"],
+                card_id=card_id,
+                items=items,
+                pos=cl_row["pos"],
+            )
+        )
+    return result
+
+
 def read_checklists(card_id: str, copy: str, cache_dir: Path) -> list[Checklist]:
     """Read all checklists (with items) for a card."""
     with _connect(cache_dir) as conn:
-        cl_rows = conn.execute(
-            "SELECT * FROM checklists WHERE card_id = ? AND copy = ? ORDER BY pos, id",
-            (card_id, copy),
-        ).fetchall()
-
-        result: list[Checklist] = []
-        for cl_row in cl_rows:
-            items_rows = conn.execute(
-                """SELECT * FROM checklist_items
-                   WHERE checklist_id = ? AND card_id = ? AND copy = ?
-                   ORDER BY pos, id""",
-                (cl_row["id"], card_id, copy),
-            ).fetchall()
-            items = [
-                ChecklistItem(
-                    id=ir["id"],
-                    name=ir["name"],
-                    state=ir["state"],
-                    pos=ir["pos"],
-                )
-                for ir in items_rows
-            ]
-            result.append(
-                Checklist(
-                    id=cl_row["id"],
-                    name=cl_row["name"],
-                    card_id=card_id,
-                    items=items,
-                    pos=cl_row["pos"],
-                )
-            )
-    return result
+        return _read_checklists_conn(conn, card_id, copy)
 
 
 def read_checklists_raw(card_id: str, copy: str, cache_dir: Path) -> list[dict]:
@@ -559,10 +566,17 @@ def read_labels(copy: str, cache_dir: Path) -> list[Label]:
     return [Label(id=r["id"], name=r["name"], color=r["color"]) for r in rows]
 
 
+def _read_labels_raw_conn(conn: sqlite3.Connection, copy: str) -> list[dict]:
+    rows = conn.execute(
+        "SELECT * FROM labels WHERE copy = ? ORDER BY name, id", (copy,)
+    ).fetchall()
+    return [{"id": r["id"], "name": r["name"], "color": r["color"]} for r in rows]
+
+
 def read_labels_raw(copy: str, cache_dir: Path) -> list[dict]:
     """Read labels as raw dicts."""
-    labels = read_labels(copy, cache_dir)
-    return [{"id": lb.id, "name": lb.name, "color": lb.color} for lb in labels]
+    with _connect(cache_dir) as conn:
+        return _read_labels_raw_conn(conn, copy)
 
 
 # ---------------------------------------------------------------------------
@@ -708,15 +722,15 @@ def resolve_list_id(identifier: str, cache_dir: Path) -> str:
     raise KeyError(f"Cannot resolve list identifier: {identifier}")
 
 
+def _resolve_list_name_conn(conn: sqlite3.Connection, list_id: str) -> str:
+    row = conn.execute("SELECT name FROM lists WHERE id = ?", (list_id,)).fetchone()
+    return row["name"] if row else list_id
+
+
 def resolve_list_name(list_id: str, cache_dir: Path) -> str:
     """Resolve a list ID to its human-readable name. Falls back to raw ID."""
     with _connect(cache_dir) as conn:
-        row = conn.execute(
-            "SELECT name FROM lists WHERE id = ?", (list_id,)
-        ).fetchone()
-    if row:
-        return row["name"]
-    return list_id
+        return _resolve_list_name_conn(conn, list_id)
 
 
 # ---------------------------------------------------------------------------
@@ -756,6 +770,18 @@ def load_uid6_index(cache_dir: Path) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
+def _checkpoint_wal(cache_dir: Path, mode: str = "TRUNCATE") -> None:
+    """Run a WAL checkpoint on a fresh post-commit connection.
+
+    Called after heavy writes (e.g. write_full_snapshot) to prevent WAL file
+    growth from surprising the next lightweight read command. The fresh
+    connection is intentional — checkpointing must happen outside the write
+    transaction for TRUNCATE mode to reclaim the WAL file.
+    """
+    with _connect(cache_dir) as conn:
+        conn.execute(f"PRAGMA wal_checkpoint({mode})")
+
+
 def write_full_snapshot(
     cards: list[Card],
     checklists: list[Checklist],
@@ -792,8 +818,10 @@ def write_full_snapshot(
 
         # Write cards + checklists (both copies)
         for copy in ("clean", "working"):
+            conn.executemany(
+                _INSERT_CARD_SQL, [_card_to_row(card, copy) for card in cards]
+            )
             for card in cards:
-                _insert_card(conn, card, copy)
                 card_cls = cls_by_card.get(card.id, [])
                 for cl in card_cls:
                     conn.execute(
@@ -816,6 +844,8 @@ def write_full_snapshot(
                                 item.pos,
                             ),
                         )
+
+    _checkpoint_wal(cache_dir)
 
 
 # ---------------------------------------------------------------------------

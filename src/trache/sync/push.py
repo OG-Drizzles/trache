@@ -60,28 +60,29 @@ def push_changes(
     changeset = compute_diff(cache_dir)
     result = PushResult()
 
-    # Validate card filter up front
+    # Resolve card filter once up front
+    resolved_filter: str | None = None
     if card_filter:
         try:
-            resolve_card_id(card_filter, cache_dir)
+            resolved_filter = resolve_card_id(card_filter, cache_dir)
         except KeyError:
             raise KeyError(f"Cannot resolve card identifier: {card_filter}")
 
     if changeset.is_empty:
         return changeset, result
 
-    # Count total items for progress reporting
+    # Collect changes, applying the resolved filter
     all_changes: list[tuple[str, CardChange]] = []
     for change in changeset.modified:
-        if card_filter and not _matches_filter(change.card_id, card_filter, cache_dir):
+        if resolved_filter and change.card_id != resolved_filter:
             continue
         all_changes.append(("modified", change))
     for change in changeset.added:
-        if card_filter and not _matches_filter(change.card_id, card_filter, cache_dir):
+        if resolved_filter and change.card_id != resolved_filter:
             continue
         all_changes.append(("added", change))
     for change in changeset.deleted:
-        if card_filter and not _matches_filter(change.card_id, card_filter, cache_dir):
+        if resolved_filter and change.card_id != resolved_filter:
             continue
         all_changes.append(("deleted", change))
 
@@ -417,14 +418,3 @@ def _resolve_label_ids(label_names: list[str], cache_dir: Path) -> list[str]:
     return resolved
 
 
-def _matches_filter(card_id: str, filter_str: str, cache_dir: Path) -> bool:
-    """Check if a card matches the filter (ID or UID6)."""
-    if card_id == filter_str:
-        return True
-    if card_id.upper().endswith(filter_str.upper()):
-        return True
-    try:
-        resolved = resolve_card_id(filter_str, cache_dir)
-        return resolved == card_id
-    except KeyError:
-        return False

@@ -355,3 +355,64 @@ class TestPushDeletedCardCleanup:
         changeset2, result2 = push_changes(config, client, cache_dir)
         assert changeset2.is_empty
         assert result2.total == 0
+
+
+class TestPushCardFilter:
+    """F-017: card_filter resolves once and correctly filters modified/added/deleted."""
+
+    def _setup_cache(self, tmp_path: Path) -> tuple[Path, TracheConfig]:
+        cache_dir = tmp_path / ".trache"
+        ensure_cache_structure(cache_dir)
+        config = TracheConfig(board_id="board1")
+        config.save(cache_dir)
+        return cache_dir, config
+
+    def test_filter_selects_only_target_card(self, tmp_path: Path) -> None:
+        """Push with card_filter pushes only the matching card, skips others."""
+        cache_dir, config = self._setup_cache(tmp_path)
+
+        card_a = Card(
+            id="card_a_00000000000000000a",
+            board_id="board1",
+            list_id="list1",
+            title="A",
+        )
+        card_b = Card(
+            id="card_b_00000000000000000b",
+            board_id="board1",
+            list_id="list1",
+            title="B",
+        )
+        write_card(card_a, "clean", cache_dir)
+        write_card(card_a, "working", cache_dir)
+        write_card(card_b, "clean", cache_dir)
+        write_card(card_b, "working", cache_dir)
+
+        # Dirty both
+        card_a.title = "A Modified"
+        card_a.dirty = True
+        write_card(card_a, "working", cache_dir)
+        card_b.title = "B Modified"
+        card_b.dirty = True
+        write_card(card_b, "working", cache_dir)
+
+        client = MagicMock()
+        client.update_card.return_value = card_a
+        client.get_card.return_value = card_a
+        client.get_card_checklists.return_value = []
+
+        changeset, result = push_changes(
+            config, client, cache_dir, card_filter=card_a.uid6
+        )
+
+        # Only card A should have been pushed
+        assert len(result.pushed) == 1
+        assert result.pushed[0].uid6 == card_a.uid6
+
+    def test_filter_invalid_uid6_raises(self, tmp_path: Path) -> None:
+        """Push with unresolvable card_filter raises KeyError."""
+        cache_dir, config = self._setup_cache(tmp_path)
+        client = MagicMock()
+
+        with pytest.raises(KeyError, match="Cannot resolve"):
+            push_changes(config, client, cache_dir, card_filter="ZZZZZZ")

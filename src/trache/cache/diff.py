@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass, field
 from difflib import unified_diff
 from pathlib import Path
 
 from trache.cache.db import (
-    list_cards,
-    read_checklists,
-    read_labels_raw,
-    resolve_list_name,
+    _list_cards_conn,
+    _read_checklists_conn,
+    _read_labels_raw_conn,
+    _resolve_list_name_conn,
+    connect,
 )
 
 
@@ -79,11 +81,11 @@ def fields_equal(field_name: str, old_val: object, new_val: object) -> bool:
 
 
 def _compute_checklist_changes(
-    card_id: str, cache_dir: Path
+    conn: sqlite3.Connection, card_id: str
 ) -> list[ChecklistChange]:
     """Compare clean vs working checklists for a card."""
-    clean_cls = read_checklists(card_id, "clean", cache_dir)
-    working_cls = read_checklists(card_id, "working", cache_dir)
+    clean_cls = _read_checklists_conn(conn, card_id, "clean")
+    working_cls = _read_checklists_conn(conn, card_id, "working")
 
     changes: list[ChecklistChange] = []
 
@@ -165,10 +167,10 @@ def _compute_checklist_changes(
     return changes
 
 
-def _compute_label_changes(cache_dir: Path) -> list[LabelChange]:
+def _compute_label_changes(conn: sqlite3.Connection) -> list[LabelChange]:
     """Compare clean vs working labels to find created/deleted labels."""
-    clean_labels = read_labels_raw("clean", cache_dir)
-    working_labels = read_labels_raw("working", cache_dir)
+    clean_labels = _read_labels_raw_conn(conn, "clean")
+    working_labels = _read_labels_raw_conn(conn, "working")
 
     clean_by_id = {lb["id"]: lb for lb in clean_labels}
     working_by_id = {lb["id"]: lb for lb in working_labels}
@@ -199,71 +201,70 @@ def _compute_label_changes(cache_dir: Path) -> list[LabelChange]:
 
 
 def compute_diff(cache_dir: Path) -> Changeset:
-    """Compute diff between clean and working copies."""
-    clean_cards = {c.id: c for c in list_cards("clean", cache_dir)}
-    working_cards = {c.id: c for c in list_cards("working", cache_dir)}
+    """Compute diff between clean and working copies (single DB connection)."""
+    with connect(cache_dir) as conn:
+        clean_cards = {c.id: c for c in _list_cards_conn(conn, "clean")}
+        working_cards = {c.id: c for c in _list_cards_conn(conn, "working")}
 
-    changeset = Changeset()
+        changeset = Changeset()
 
-    # Added cards (in working but not in clean)
-    for card_id in working_cards.keys() - clean_cards.keys():
-        card = working_cards[card_id]
-        annotations: list[str] = []
-        if card.closed:
-            annotations.append("archived")
-        if card.list_id:
-            try:
-                list_name = resolve_list_name(card.list_id, cache_dir)
-                if list_name != card.list_id:  # resolved successfully
-                    annotations.append(f"in {list_name}")
-            except (KeyError, FileNotFoundError):
-                pass
-        if card.labels:
-            annotations.append(f"labels: {', '.join(card.labels)}")
-        changeset.added.append(CardChange(
-            card_id=card_id,
-            title=card.title,
-            change_type="added",
-            annotations=annotations,
-        ))
-
-    # Deleted cards (in clean but not in working)
-    for card_id in clean_cards.keys() - working_cards.keys():
-        card = clean_cards[card_id]
-        changeset.deleted.append(CardChange(
-            card_id=card_id,
-            title=card.title,
-            change_type="deleted",
-        ))
-
-    # Modified cards (in both, check for changes)
-    for card_id in clean_cards.keys() & working_cards.keys():
-        clean_card = clean_cards[card_id]
-        working_card = working_cards[card_id]
-
-        field_changes: dict[str, tuple[str, str]] = {}
-        for f in _DIFF_FIELDS:
-            old_val = getattr(clean_card, f)
-            new_val = getattr(working_card, f)
-            if not fields_equal(f, old_val, new_val):
-                field_changes[f] = (str(old_val), str(new_val))
-
-        # Check checklist changes
-        cl_changes = _compute_checklist_changes(card_id, cache_dir)
-
-        if field_changes or cl_changes:
-            changeset.modified.append(CardChange(
+        # Added cards (in working but not in clean)
+        for card_id in working_cards.keys() - clean_cards.keys():
+            card = working_cards[card_id]
+            annotations: list[str] = []
+            if card.closed:
+                annotations.append("archived")
+            if card.list_id:
+                try:
+                    list_name = _resolve_list_name_conn(conn, card.list_id)
+                    if list_name != card.list_id:
+                        annotations.append(f"in {list_name}")
+                except (KeyError, FileNotFoundError):
+                    pass
+            if card.labels:
+                annotations.append(f"labels: {', '.join(card.labels)}")
+            changeset.added.append(CardChange(
                 card_id=card_id,
-                title=working_card.title,
-                change_type="modified",
-                field_changes=field_changes,
-                checklist_changes=cl_changes,
+                title=card.title,
+                change_type="added",
+                annotations=annotations,
             ))
 
-    # Compute label changes
-    changeset.label_changes = _compute_label_changes(cache_dir)
+        # Deleted cards (in clean but not in working)
+        for card_id in clean_cards.keys() - working_cards.keys():
+            card = clean_cards[card_id]
+            changeset.deleted.append(CardChange(
+                card_id=card_id,
+                title=card.title,
+                change_type="deleted",
+            ))
 
-    # Sort all lists for deterministic output
+        # Modified cards (in both, check for changes)
+        for card_id in clean_cards.keys() & working_cards.keys():
+            clean_card = clean_cards[card_id]
+            working_card = working_cards[card_id]
+
+            field_changes: dict[str, tuple[str, str]] = {}
+            for f in _DIFF_FIELDS:
+                old_val = getattr(clean_card, f)
+                new_val = getattr(working_card, f)
+                if not fields_equal(f, old_val, new_val):
+                    field_changes[f] = (str(old_val), str(new_val))
+
+            cl_changes = _compute_checklist_changes(conn, card_id)
+
+            if field_changes or cl_changes:
+                changeset.modified.append(CardChange(
+                    card_id=card_id,
+                    title=working_card.title,
+                    change_type="modified",
+                    field_changes=field_changes,
+                    checklist_changes=cl_changes,
+                ))
+
+        changeset.label_changes = _compute_label_changes(conn)
+
+    # Sort outside the connection block
     changeset.added.sort(key=lambda c: c.title)
     changeset.modified.sort(key=lambda c: c.title)
     changeset.deleted.sort(key=lambda c: c.title)

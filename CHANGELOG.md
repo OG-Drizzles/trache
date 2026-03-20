@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.3.6 — 2026-03-20
+
+Audit batches 5–6 remediation: DB performance/resilience, datetime consolidation, and diff single-connection refactor.
+
+### Performance
+
+- **`executemany` for card inserts** (O-002): `write_cards_batch` and `write_full_snapshot` use `executemany` instead of per-card `execute` loops.
+- **Single-connection `compute_diff`** (O-004): diff engine opens one DB connection for the entire diff instead of N+1 connections per card/checklist/label query.
+- **Resolve push filter once** (F-017): `push_changes` resolves `card_filter` to a full ID once up front, replacing per-change `_matches_filter` calls that each re-resolved the UID6.
+
+### Reliability
+
+- **`PRAGMA synchronous=NORMAL`** (O-003): every connection now sets `synchronous=NORMAL` for WAL-safe durability with reduced fsync overhead.
+- **Configurable `busy_timeout`** (O-007): `TRACHE_DB_BUSY_TIMEOUT` env var (ms, default 10000) prevents `database is locked` errors under concurrent access; validated as positive integer.
+- **WAL checkpoint after snapshot** (O-014): `write_full_snapshot` runs a `TRUNCATE` checkpoint on a fresh connection after commit, preventing WAL file growth.
+
+### Refactoring
+
+- **`_datetime.py` extraction** (F-008/O-009): `_fmt_dt`/`_parse_dt` consolidated from `db.py` and `store.py` into `cache/_datetime.py` with strict type annotations; hard cutover, no legacy fallbacks.
+
+### Tests
+
+- New `TestConnectionPragmas` (5 tests): synchronous=NORMAL, busy_timeout default/override/invalid/zero/negative.
+- New `TestFullSnapshot.test_write_full_snapshot_card_count_both_copies` (O-002): 50-card behavioural snapshot test.
+- New `TestFullSnapshot.test_wal_checkpoint_after_snapshot` (O-014): checkpoint smoke test.
+- New `TestPushCardFilter` (2 tests): filtered push selects only target card; unresolvable filter raises KeyError.
+- New `tests/test_datetime.py` (10 tests): `fmt_dt`/`parse_dt` unit tests including roundtrip, timezone normalisation, fractional seconds.
+- New `TestComputeDiffSingleConnection`: asserts exactly one DB connection opened during `compute_diff`.
+
 ## 0.3.5 — 2026-03-20
 
 Audit batches 2–4 remediation: 10 findings across data integrity, API client hardening, and code consolidation.

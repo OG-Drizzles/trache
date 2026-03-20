@@ -65,6 +65,35 @@ class TestComputeDiff:
         assert "list_id" in changeset.modified[0].field_changes
 
 
+class TestComputeDiffSingleConnection:
+    """O-004: compute_diff must use exactly one DB connection."""
+
+    def test_single_connection(self, sample_card: Card, cache_dir: Path) -> None:
+        from contextlib import contextmanager
+        from unittest.mock import patch
+
+        from trache.cache import db as db_module
+        from trache.cache import diff as diff_module
+
+        connection_count = 0
+        original = db_module._connect
+
+        @contextmanager
+        def counting_connect(cd):
+            nonlocal connection_count
+            connection_count += 1
+            with original(cd) as conn:
+                yield conn
+
+        db_module.write_card(sample_card, "clean", cache_dir)
+        db_module.write_card(sample_card, "working", cache_dir)
+
+        with patch.object(diff_module, "connect", counting_connect):
+            compute_diff(cache_dir)
+
+        assert connection_count == 1
+
+
 class TestFormatDiff:
     def test_empty(self) -> None:
         from trache.cache.diff import Changeset

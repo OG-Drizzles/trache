@@ -2,41 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
+from trache.cache._datetime import fmt_dt as _fmt_dt
+from trache.cache._datetime import parse_dt as _parse_dt
 from trache.cache.models import Card
-
-
-def _fmt_dt(dt: Optional[datetime]) -> Optional[str]:
-    if dt is None:
-        return None
-    if dt.tzinfo is not None and dt.utcoffset() is not None:
-        from datetime import timezone
-
-        if dt.utcoffset().total_seconds() != 0:
-            dt = dt.astimezone(timezone.utc)
-    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def _parse_dt(val: Optional[str]) -> Optional[datetime]:
-    if val is None:
-        return None
-    val = val.replace("Z", "+00:00")
-    # Strip fractional seconds for Python 3.10 compat
-    if "." in val:
-        dot = val.index(".")
-        # Find timezone delimiter after the dot
-        tz_start = len(val)
-        for i in range(dot + 1, len(val)):
-            if val[i] in ("+", "-"):
-                tz_start = i
-                break
-        val = val[:dot] + val[tz_start:]
-    return datetime.fromisoformat(val)
 
 
 def card_to_markdown(card: Card) -> str:

@@ -396,6 +396,30 @@ class TestFullSnapshot:
         loaded_labels = read_labels("clean", db_dir)
         assert len(loaded_labels) == 1
 
+    def test_write_full_snapshot_card_count_both_copies(self, db_dir: Path) -> None:
+        """O-002: write_full_snapshot persists cards to both clean and working via executemany."""
+        cards = [_make_card(card_id=f"card{i:022d}", title=f"Card {i}") for i in range(50)]
+        lists = [TrelloList(id="list1", name="To Do", pos=1)]
+        labels = [Label(id="lbl1", name="bug", color="red")]
+        write_full_snapshot(cards, [], lists, labels, db_dir)
+
+        clean = list_cards("clean", db_dir)
+        working = list_cards("working", db_dir)
+        assert len(clean) == 50
+        assert len(working) == 50
+        # Verify content (spot-check first and last)
+        assert clean[0].title == "Card 0"
+        assert clean[-1].title == "Card 49"
+
+    def test_wal_checkpoint_after_snapshot(self, db_dir: Path) -> None:
+        """O-014: write_full_snapshot runs WAL checkpoint without error."""
+        cards = [_make_card(card_id=f"card{i:022d}", title=f"Card {i}") for i in range(3)]
+        lists = [TrelloList(id="list1", name="To Do", pos=1)]
+        labels = [Label(id="lbl1", name="bug", color="red")]
+        write_full_snapshot(cards, [], lists, labels, db_dir)
+        # DB readable after checkpoint
+        assert len(list_cards("clean", db_dir)) == 3
+
 
 # ---------------------------------------------------------------------------
 # Migration from files
@@ -538,3 +562,50 @@ class TestWriteCardPull:
         # Data should NOT exist because we rolled back the caller's transaction
         with pytest.raises(FileNotFoundError):
             read_card(card.id, "clean", db_dir)
+
+
+# ---------------------------------------------------------------------------
+# Connection pragmas (O-003, O-007)
+# ---------------------------------------------------------------------------
+
+
+class TestConnectionPragmas:
+    def test_synchronous_normal(self, db_dir: Path) -> None:
+        """O-003: synchronous is NORMAL on every connection."""
+        with connect(db_dir) as conn:
+            row = conn.execute("PRAGMA synchronous").fetchone()
+        assert row[0] == 1  # 1 = NORMAL in SQLite
+
+    def test_busy_timeout_default(self, db_dir: Path) -> None:
+        """O-007: default busy_timeout is 10000ms."""
+        with connect(db_dir) as conn:
+            row = conn.execute("PRAGMA busy_timeout").fetchone()
+        assert row[0] == 10000
+
+    def test_busy_timeout_env_override(self, db_dir: Path, monkeypatch) -> None:
+        """O-007: TRACHE_DB_BUSY_TIMEOUT env var overrides the default."""
+        monkeypatch.setenv("TRACHE_DB_BUSY_TIMEOUT", "5000")
+        with connect(db_dir) as conn:
+            row = conn.execute("PRAGMA busy_timeout").fetchone()
+        assert row[0] == 5000
+
+    def test_busy_timeout_invalid_raises(self, db_dir: Path, monkeypatch) -> None:
+        """O-007: non-integer TRACHE_DB_BUSY_TIMEOUT fails fast."""
+        monkeypatch.setenv("TRACHE_DB_BUSY_TIMEOUT", "not_a_number")
+        with pytest.raises(ValueError, match="TRACHE_DB_BUSY_TIMEOUT"):
+            with connect(db_dir) as _conn:
+                pass
+
+    def test_busy_timeout_zero_raises(self, db_dir: Path, monkeypatch) -> None:
+        """O-007: zero busy_timeout rejected (must be positive)."""
+        monkeypatch.setenv("TRACHE_DB_BUSY_TIMEOUT", "0")
+        with pytest.raises(ValueError, match="positive integer"):
+            with connect(db_dir) as _conn:
+                pass
+
+    def test_busy_timeout_negative_raises(self, db_dir: Path, monkeypatch) -> None:
+        """O-007: negative busy_timeout rejected."""
+        monkeypatch.setenv("TRACHE_DB_BUSY_TIMEOUT", "-1")
+        with pytest.raises(ValueError, match="positive integer"):
+            with connect(db_dir) as _conn:
+                pass
