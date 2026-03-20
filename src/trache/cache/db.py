@@ -385,20 +385,32 @@ def delete_stale_cards(keep_ids: set[str], copy: str, cache_dir: Path) -> None:
             conn.execute("DELETE FROM checklist_items WHERE copy = ?", (copy,))
             return
 
-        # Build placeholders
-        placeholders = ",".join("?" for _ in keep_ids)
-        ids = list(keep_ids)
+        # Temp table is per-connection in SQLite — each _connect() call yields an
+        # independent connection, so no cross-call collisions are possible. The
+        # CREATE IF NOT EXISTS + DELETE pattern is idempotent within a connection
+        # and avoids DDL in the rollback path.
         conn.execute(
-            f"DELETE FROM cards WHERE copy = ? AND id NOT IN ({placeholders})",
-            [copy] + ids,
+            "CREATE TEMP TABLE IF NOT EXISTS _trache_keep_ids (id TEXT PRIMARY KEY)"
+        )
+        conn.execute("DELETE FROM _trache_keep_ids")
+        conn.executemany(
+            "INSERT OR IGNORE INTO _trache_keep_ids (id) VALUES (?)",
+            ((card_id,) for card_id in keep_ids),
         )
         conn.execute(
-            f"DELETE FROM checklists WHERE copy = ? AND card_id NOT IN ({placeholders})",
-            [copy] + ids,
+            "DELETE FROM cards WHERE copy = ? "
+            "AND id NOT IN (SELECT id FROM _trache_keep_ids)",
+            (copy,),
         )
         conn.execute(
-            f"DELETE FROM checklist_items WHERE copy = ? AND card_id NOT IN ({placeholders})",
-            [copy] + ids,
+            "DELETE FROM checklists WHERE copy = ? "
+            "AND card_id NOT IN (SELECT id FROM _trache_keep_ids)",
+            (copy,),
+        )
+        conn.execute(
+            "DELETE FROM checklist_items WHERE copy = ? "
+            "AND card_id NOT IN (SELECT id FROM _trache_keep_ids)",
+            (copy,),
         )
 
 

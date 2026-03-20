@@ -41,17 +41,13 @@ def add(
             )
             raise typer.Exit(1)
 
-    from trache.api.auth import TrelloAuth
-    from trache.api.client import TrelloClient
     from trache.cache.db import resolve_card_id
-    from trache.config import TracheConfig
+    from trache.cli._context import get_client_and_config
 
     cache_dir = _cache_dir()
     card_id = resolve_card_id(card_identifier, cache_dir)
-
-    config = TracheConfig.load(cache_dir)
-    auth = TrelloAuth.from_env(config.api_key_env, config.token_env)
-    with TrelloClient(auth) as client:
+    client, _config = get_client_and_config(cache_dir)
+    with client:
         comment = client.add_comment(card_id, text)
     if out.is_human:
         out.human(f"[green]Comment added ({comment.id}) (API — posted immediately)[/green]")
@@ -83,17 +79,13 @@ def edit(
             )
             raise typer.Exit(1)
 
-    from trache.api.auth import TrelloAuth
-    from trache.api.client import TrelloClient
     from trache.cache.db import resolve_card_id
-    from trache.config import TracheConfig
+    from trache.cli._context import get_client_and_config
 
     cache_dir = _cache_dir()
     card_id = resolve_card_id(card_identifier, cache_dir)
-
-    config = TracheConfig.load(cache_dir)
-    auth = TrelloAuth.from_env(config.api_key_env, config.token_env)
-    with TrelloClient(auth) as client:
+    client, _config = get_client_and_config(cache_dir)
+    with client:
         comment = client.update_comment(card_id, comment_id, text)
     if out.is_human:
         out.human(f"[green]Comment updated ({comment.id}) (API — updated immediately)[/green]")
@@ -118,17 +110,13 @@ def delete(
         )
         raise typer.Exit(1)
 
-    from trache.api.auth import TrelloAuth
-    from trache.api.client import TrelloClient
     from trache.cache.db import resolve_card_id
-    from trache.config import TracheConfig
+    from trache.cli._context import get_client_and_config
 
     cache_dir = _cache_dir()
     card_id = resolve_card_id(card_identifier, cache_dir)
-
-    config = TracheConfig.load(cache_dir)
-    auth = TrelloAuth.from_env(config.api_key_env, config.token_env)
-    with TrelloClient(auth) as client:
+    client, _config = get_client_and_config(cache_dir)
+    with client:
         client.delete_comment(card_id, comment_id)
     if out.is_human:
         out.human(f"[green]Comment deleted ({comment_id}) (API — deleted immediately)[/green]")
@@ -143,18 +131,14 @@ def list_comments(
     compact: bool = typer.Option(False, "--compact", help="One-line-per-comment output"),
 ) -> None:
     """List comments on a card (fetches from API)."""
-    from trache.api.auth import TrelloAuth
-    from trache.api.client import TrelloClient
     from trache.cache.db import resolve_card_id
-    from trache.config import TracheConfig
+    from trache.cli._context import get_client_and_config
 
     out = get_output()
     cache_dir = _cache_dir()
     card_id = resolve_card_id(card_identifier, cache_dir)
-
-    config = TracheConfig.load(cache_dir)
-    auth = TrelloAuth.from_env(config.api_key_env, config.token_env)
-    with TrelloClient(auth) as client:
+    client, _config = get_client_and_config(cache_dir)
+    with client:
         comments = client.get_card_comments(card_id)
 
     if not comments:

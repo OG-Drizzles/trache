@@ -17,6 +17,25 @@ batch_app = typer.Typer(no_args_is_help=True)
 _DISPATCH: dict[tuple[str, str], Callable] = {}
 
 
+def _guard_archived_batch(identifier: str, cache_dir: Path) -> dict | None:
+    """Return error dict if card is archived, None otherwise.
+
+    Resolution failures (KeyError, FileNotFoundError) are intentionally not
+    converted by the guard — the underlying handler retains its existing
+    not-found/error behaviour. The guard only blocks when the card is
+    definitively found and archived.
+    """
+    from trache.cache.working import read_working_card
+
+    try:
+        card = read_working_card(identifier, cache_dir)
+        if card.closed:
+            return {"ok": False, "error": f"Card {card.uid6} is archived"}
+    except (KeyError, FileNotFoundError):
+        pass
+    return None
+
+
 def _register_handlers() -> None:
     """Populate dispatch table with batchable command handlers."""
     if _DISPATCH:
@@ -39,18 +58,27 @@ def _register_handlers() -> None:
     def _handle_edit_title(args: list[str], cache_dir: Path, board_id: str) -> dict:
         if len(args) < 2:
             return {"ok": False, "error": "Usage: card edit-title <uid6> <title>"}
+        guard = _guard_archived_batch(args[0], cache_dir)
+        if guard is not None:
+            return guard
         card = edit_title(args[0], args[1], cache_dir)
         return {"ok": True, "uid6": card.uid6, "title": card.title}
 
     def _handle_edit_desc(args: list[str], cache_dir: Path, board_id: str) -> dict:
         if len(args) < 2:
             return {"ok": False, "error": "Usage: card edit-desc <uid6> <desc>"}
+        guard = _guard_archived_batch(args[0], cache_dir)
+        if guard is not None:
+            return guard
         card = edit_description(args[0], args[1], cache_dir)
         return {"ok": True, "uid6": card.uid6, "title": card.title, "description": card.description}
 
     def _handle_move(args: list[str], cache_dir: Path, board_id: str) -> dict:
         if len(args) < 2:
             return {"ok": False, "error": "Usage: card move <uid6> <list>"}
+        guard = _guard_archived_batch(args[0], cache_dir)
+        if guard is not None:
+            return guard
         from trache.cache.db import resolve_list_name
         card = move_card(args[0], args[1], cache_dir)
         return {
@@ -83,23 +111,35 @@ def _register_handlers() -> None:
     def _handle_add_label(args: list[str], cache_dir: Path, board_id: str) -> dict:
         if len(args) < 2:
             return {"ok": False, "error": "Usage: card add-label <uid6> <label>"}
+        guard = _guard_archived_batch(args[0], cache_dir)
+        if guard is not None:
+            return guard
         card, added = add_label(args[0], args[1], cache_dir)
         return {"ok": True, "uid6": card.uid6, "title": card.title, "added": added}
 
     def _handle_remove_label(args: list[str], cache_dir: Path, board_id: str) -> dict:
         if len(args) < 2:
             return {"ok": False, "error": "Usage: card remove-label <uid6> <label>"}
+        guard = _guard_archived_batch(args[0], cache_dir)
+        if guard is not None:
+            return guard
         card = remove_label(args[0], args[1], cache_dir)
         return {"ok": True, "uid6": card.uid6, "title": card.title}
 
     def _handle_checklist_check(args: list[str], cache_dir: Path, board_id: str) -> dict:
         if len(args) < 2:
             return {"ok": False, "error": "Usage: checklist check <uid6> <item_id>"}
+        guard = _guard_archived_batch(args[0], cache_dir)
+        if guard is not None:
+            return guard
         return check_checklist_item(args[0], args[1], cache_dir)
 
     def _handle_checklist_uncheck(args: list[str], cache_dir: Path, board_id: str) -> dict:
         if len(args) < 2:
             return {"ok": False, "error": "Usage: checklist uncheck <uid6> <item_id>"}
+        guard = _guard_archived_batch(args[0], cache_dir)
+        if guard is not None:
+            return guard
         return uncheck_checklist_item(args[0], args[1], cache_dir)
 
     def _handle_checklist_add_item(args: list[str], cache_dir: Path, board_id: str) -> dict:
@@ -108,11 +148,17 @@ def _register_handlers() -> None:
                 "ok": False,
                 "error": "Usage: checklist add-item <uid6> <checklist_name> <text>",
             }
+        guard = _guard_archived_batch(args[0], cache_dir)
+        if guard is not None:
+            return guard
         return add_checklist_item(args[0], args[1], args[2], cache_dir)
 
     def _handle_checklist_remove_item(args: list[str], cache_dir: Path, board_id: str) -> dict:
         if len(args) < 2:
             return {"ok": False, "error": "Usage: checklist remove-item <uid6> <item_id>"}
+        guard = _guard_archived_batch(args[0], cache_dir)
+        if guard is not None:
+            return guard
         return remove_checklist_item(args[0], args[1], cache_dir)
 
     _DISPATCH[("card", "edit-title")] = _handle_edit_title

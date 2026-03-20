@@ -13,6 +13,7 @@ from rich.markup import escape
 from trache import __version__
 from trache.cli._context import (
     TRACHE_ROOT,
+    board_initialised,
     get_client_and_config,
     list_board_names,
     resolve_cache_dir,
@@ -102,7 +103,7 @@ def init(
             board_id = board_obj.id
             config.board_id = board_id
             config.board_name = board_obj.name
-            out.human(f"[green]Created board: {board_obj.name} on Trello[/green]")
+            out.human(f"[green]Created board: {escape(board_obj.name)} on Trello[/green]")
 
     if not board_id and not board_url and not new:
         import sys
@@ -153,7 +154,9 @@ def init(
                 try:
                     member = client.get_current_member()
                     member_name = member.get("fullName") or member.get("username", "unknown")
-                    out.human(f"[green]Token valid — authenticated as {member_name}[/green]")
+                    out.human(
+                        f"[green]Token valid — authenticated as {escape(member_name)}[/green]"
+                    )
                 except httpx.HTTPStatusError as e:
                     if e.response.status_code == 401:
                         out.human("[red]Token validation failed (401 Unauthorized)[/red]")
@@ -163,7 +166,7 @@ def init(
                 try:
                     board_obj = client.get_board(config.board_id)
                     config.board_name = board_obj.name
-                    out.human(f"Board: [bold]{board_obj.name}[/bold]")
+                    out.human(f"Board: [bold]{escape(board_obj.name)}[/bold]")
                 except Exception:
                     out.human("[yellow]Could not fetch board name[/yellow]")
 
@@ -327,20 +330,22 @@ def status() -> None:
 
     out = get_output()
 
-    if not TRACHE_ROOT.exists():
+    # Branch 1: Uninitialised — no boards configured.
+    if not TRACHE_ROOT.exists() or not board_initialised():
         if out.is_human:
-            out.human("Clean — no local changes.")
+            out.human("No boards initialised — nothing to report.")
         else:
             out.json({"added": [], "modified": [], "deleted": [], "label_changes": []})
         return
+
+    # Branch 2: Broken config — boards/ exists but resolve fails.
     try:
         cache_dir = resolve_cache_dir()
-    except FileNotFoundError:
-        if out.is_human:
-            out.human("Clean — no local changes.")
-        else:
-            out.json({"added": [], "modified": [], "deleted": [], "label_changes": []})
-        return
+    except FileNotFoundError as e:
+        out.error(str(e))
+        raise typer.Exit(1)
+
+    # Branch 3: Configured — normal diff path.
     changeset = compute_diff(cache_dir)
 
     if not out.is_human:
@@ -361,12 +366,12 @@ def status() -> None:
         out.human(f"[yellow]  Modified: {len(changeset.modified)}[/yellow]")
         for c in changeset.modified:
             fields = ", ".join(c.field_changes.keys())
-            out.human(f"    ~ {c.title} ({fields})")
+            out.human(f"    ~ {escape(c.title)} ({fields})")
 
     if changeset.deleted:
         out.human(f"[red]  Deleted: {len(changeset.deleted)}[/red]")
         for c in changeset.deleted:
-            out.human(f"    - {c.title}")
+            out.human(f"    - {escape(c.title)}")
 
     if changeset.label_changes:
         created = [lc for lc in changeset.label_changes if lc.change_type == "created"]
@@ -374,11 +379,11 @@ def status() -> None:
         if created:
             out.human(f"[green]  Labels created: {len(created)}[/green]")
             for lc in created:
-                out.human(f"    + {lc.label_name} ({lc.label_color or 'no color'})")
+                out.human(f"    + {escape(lc.label_name)} ({lc.label_color or 'no color'})")
         if deleted:
             out.human(f"[red]  Labels deleted: {len(deleted)}[/red]")
             for lc in deleted:
-                out.human(f"    - {lc.label_name}")
+                out.human(f"    - {escape(lc.label_name)}")
 
 
 @app.command()

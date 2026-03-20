@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Protocol
 from uuid import uuid4
 
 from trache.cache.db import (
@@ -17,6 +18,12 @@ from trache.cache.db import (
     write_checklists_raw,
 )
 from trache.cache.models import Card
+
+
+class ChecklistMutator(Protocol):
+    """Callback that mutates a checklists list in-place and returns a result dict."""
+
+    def __call__(self, checklists: list[dict[str, Any]]) -> dict[str, Any]: ...
 
 
 def _now() -> datetime:
@@ -156,8 +163,8 @@ def remove_label(identifier: str, label_name: str, cache_dir: Path) -> Card:
 
 
 def _checklist_update(
-    identifier: str, cache_dir: Path, mutate_fn
-) -> dict:
+    identifier: str, cache_dir: Path, mutate_fn: ChecklistMutator
+) -> dict[str, Any]:
     """Resolve → load → mutate → save → dirty card. Returns mutate_fn result."""
     card_id = resolve_card_id(identifier, cache_dir)
     checklists = read_checklists_raw(card_id, "working", cache_dir)
@@ -233,5 +240,20 @@ def remove_checklist_item(identifier: str, item_id: str, cache_dir: Path) -> dic
                     cl["items"].pop(i)
                     return {"ok": True, "item_id": item_id}
         raise KeyError(f"Item {item_id} not found")
+
+    return _checklist_update(identifier, cache_dir, _mutate)
+
+
+def create_checklist(identifier: str, name: str, cache_dir: Path) -> dict[str, Any]:
+    """Create a new checklist. Raises ValueError on duplicate name."""
+    from uuid import uuid4 as _uuid4
+
+    def _mutate(checklists: list[dict[str, Any]]) -> dict[str, Any]:
+        for cl in checklists:
+            if cl["name"] == name:
+                raise ValueError(f"Checklist '{name}' already exists on this card")
+        temp_id = f"temp_{_uuid4().hex[:14]}t~"
+        checklists.append({"id": temp_id, "name": name, "items": []})
+        return {"ok": True, "name": name, "id": temp_id}
 
     return _checklist_update(identifier, cache_dir, _mutate)

@@ -129,3 +129,57 @@ class TestBatchRun:
         # Verify in db
         cls = read_checklists_raw("67abc123def4567890fedcba", "working", cache_dir)
         assert cls[0]["items"][0]["state"] == "complete"
+
+
+class TestBatchArchivedGuard:
+    def _archive_card(self, cache_dir: Path) -> None:
+        """Archive the test card in working copy."""
+        card = read_card("67abc123def4567890fedcba", "working", cache_dir)
+        card.closed = True
+        write_card(card, "working", cache_dir)
+
+    def test_edit_title_blocked_on_archived(self, tmp_path: Path, monkeypatch) -> None:
+        """F-011: edit-title on archived card → error dict."""
+        cache_dir = _setup_batch(tmp_path, monkeypatch)
+        self._archive_card(cache_dir)
+        input_text = 'card edit-title FEDCBA "New Title"\n'
+        result = runner.invoke(app, ["batch", "run"], input=input_text)
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert data[0]["ok"] is False
+        assert "archived" in data[0]["error"].lower()
+
+    def test_checklist_check_blocked_on_archived(self, tmp_path: Path, monkeypatch) -> None:
+        """F-011: checklist check on archived card → error dict."""
+        cache_dir = _setup_batch(tmp_path, monkeypatch)
+        self._archive_card(cache_dir)
+        input_text = 'checklist check FEDCBA ci001\n'
+        result = runner.invoke(app, ["batch", "run"], input=input_text)
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert data[0]["ok"] is False
+        assert "archived" in data[0]["error"].lower()
+
+    def test_archive_allowed_on_archived(self, tmp_path: Path, monkeypatch) -> None:
+        """F-011: archive on already-archived card is allowed (not guarded)."""
+        cache_dir = _setup_batch(tmp_path, monkeypatch)
+        self._archive_card(cache_dir)
+        input_text = 'card archive FEDCBA\n'
+        result = runner.invoke(app, ["batch", "run"], input=input_text)
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert data[0]["ok"] is True
+
+    def test_guard_does_not_halt_subsequent_commands(self, tmp_path: Path, monkeypatch) -> None:
+        """F-011: archived guard error on one command doesn't halt the batch."""
+        cache_dir = _setup_batch(tmp_path, monkeypatch)
+        self._archive_card(cache_dir)
+        input_text = (
+            'card edit-title FEDCBA "Blocked"\n'
+            'card archive FEDCBA\n'
+        )
+        result = runner.invoke(app, ["batch", "run"], input=input_text)
+        data = json.loads(result.output)
+        assert len(data) == 2
+        assert data[0]["ok"] is False  # blocked by guard
+        assert data[1]["ok"] is True   # archive still works

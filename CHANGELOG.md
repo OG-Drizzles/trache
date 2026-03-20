@@ -1,6 +1,35 @@
 # Changelog
 
-## v0.3.4
+## 0.3.5 — 2026-03-20
+
+Audit batches 2–4 remediation: 10 findings across data integrity, API client hardening, and code consolidation.
+
+### Fixed
+
+- **Large-board `delete_stale_cards` safety** (F-004): replaced unbounded `IN (?,?,…)` clause with temp-table approach to avoid SQLite's `SQLITE_MAX_VARIABLE_NUMBER` limit on boards with 1000+ cards.
+- **Tri-state board context for `status`** (F-018): `status` now distinguishes uninitialised (no boards), configured (normal diff), and broken config (error surfaces) — no longer masks real config errors as "Clean".
+- **POST retry safety** (F-006): `_retry` now accepts `idempotent` parameter; POST requests no longer retry on 5xx/transport errors, preventing duplicate side effects (comments, cards).
+- **Debug log for unparseable Trello dates** (F-014): `_parse_trello_date` emits a DEBUG log on malformed date strings instead of silent `None`.
+- **Batch archived-card guard** (F-011): all 9 mutation batch handlers now reject operations on archived cards; `create` and `archive` are intentionally unguarded.
+- **`create_checklist` extracted to `working.py`** (F-012): thin CLI delegation replaces duplicated logic in `checklist.py`.
+
+### Changed
+
+- **Configurable API timeout** (O-012): `TRACHE_API_TIMEOUT` env var overrides the default; CLI default raised from 30s to 60s via `get_client_and_config`.
+- **DRY comment commands** (F-005/O-006): 4 duplicated client-init blocks in `comment.py` replaced with shared `get_client_and_config`, inheriting the 60s timeout.
+- **`ChecklistMutator` Protocol** (O-010): typed callback protocol for `_checklist_update` in `working.py`.
+
+### Tests
+
+- New `tests/test_client_retry.py` (O-001): 9 test classes covering retry behaviour with `httpx.MockTransport` — 429 Retry-After, exponential backoff, POST no-retry on 5xx/transport, client errors, max retries, success path.
+- New `TestStatusBoardContext` (3 tests): uninitialised, no-boards-dir, broken-config.
+- New `TestBatchArchivedGuard` (4 tests): edit-title blocked, checklist check blocked, archive allowed, error isolation.
+- New `TestCreateChecklist` (3 tests): success + persistence, duplicate raises, card dirtied.
+- New `TestParseTrelloDateLog` (2 tests): malformed date logs, empty/None no-log.
+- New `TestApiTimeoutEnvVar` (3 tests): default 60s, env var override, invalid fails fast.
+- Large-board `delete_stale_cards` test (1200 cards).
+
+## 0.3.4 — 2026-03-20
 
 ### Changed
 - **API stats are now per-client, not process-global.** `TrelloClient.get_stats()` replaces the module-level `get_api_stats()` / `reset_api_stats()` functions. Each client instance tracks its own call count and latency independently. _(F-001)_

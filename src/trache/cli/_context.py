@@ -53,6 +53,16 @@ def list_board_names() -> list[str]:
     )
 
 
+def board_initialised() -> bool:
+    """Return True if at least one board has been initialised (.trache/boards/ exists).
+
+    False means no boards have ever been set up — a legitimate 'nothing to report'
+    state for commands like status. True means resolve_cache_dir() should succeed,
+    and if it doesn't, the error is real and must surface.
+    """
+    return (TRACHE_ROOT / "boards").exists()
+
+
 def resolve_cache_dir() -> Path:
     """Resolve the cache directory for the active board.
 
@@ -197,13 +207,16 @@ def _fuzzy_match(name: str) -> Optional[str]:
 
 def get_client_and_config(cache_dir: Path):
     """Create an authenticated Trello client and config from a cache directory."""
+    import os
+
     from trache.api.auth import TrelloAuth
     from trache.api.client import TrelloClient
     from trache.config import TracheConfig
 
     config = TracheConfig.load(cache_dir)
     auth = TrelloAuth.from_env(config.api_key_env, config.token_env)
-    return TrelloClient(auth), config
+    timeout = float(os.environ.get("TRACHE_API_TIMEOUT", "60"))
+    return TrelloClient(auth, timeout=timeout), config
 
 
 def _edit_distance_leq(a: str, b: str, threshold: int) -> bool:

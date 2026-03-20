@@ -15,6 +15,7 @@ from trache.cache.working import (
     archive_card,
     check_checklist_item,
     create_card,
+    create_checklist,
     edit_description,
     edit_title,
     move_card,
@@ -221,3 +222,38 @@ class TestRemoveChecklistItem:
         _seed_card_with_checklist(sample_card, sample_lists, cache_dir)
         with pytest.raises(KeyError, match="not found"):
             remove_checklist_item(sample_card.uid6, "nonexistent", cache_dir)
+
+
+class TestCreateChecklist:
+    def test_create_checklist_success(
+        self, sample_card: Card, sample_lists: list[TrelloList], cache_dir: Path
+    ) -> None:
+        """F-012: create_checklist creates and persists a new checklist."""
+        _seed_card_with_checklist(sample_card, sample_lists, cache_dir)
+        result = create_checklist(sample_card.uid6, "New CL", cache_dir)
+        assert result["ok"] is True
+        assert result["name"] == "New CL"
+        assert result["id"].startswith("temp_")
+
+        # Verify persisted in DB
+        from trache.cache.db import read_checklists_raw
+        cls = read_checklists_raw(sample_card.id, "working", cache_dir)
+        names = [c["name"] for c in cls]
+        assert "New CL" in names
+
+    def test_create_checklist_duplicate_raises(
+        self, sample_card: Card, sample_lists: list[TrelloList], cache_dir: Path
+    ) -> None:
+        """F-012: duplicate checklist name raises ValueError."""
+        _seed_card_with_checklist(sample_card, sample_lists, cache_dir)
+        with pytest.raises(ValueError, match="already exists"):
+            create_checklist(sample_card.uid6, "MVP", cache_dir)
+
+    def test_create_checklist_dirties_card(
+        self, sample_card: Card, sample_lists: list[TrelloList], cache_dir: Path
+    ) -> None:
+        """F-012: creating a checklist marks card as dirty."""
+        _seed_card_with_checklist(sample_card, sample_lists, cache_dir)
+        create_checklist(sample_card.uid6, "Another CL", cache_dir)
+        card = read_card(sample_card.id, "working", cache_dir)
+        assert card.dirty is True

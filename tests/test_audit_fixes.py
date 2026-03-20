@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
 from conftest import make_mock_client, setup_cache
 
 from trache.cache.db import read_card, write_card, write_labels_raw
@@ -208,3 +209,68 @@ class TestInstanceOwnedApiStats:
         out.api_stats(None)
         captured = capsys.readouterr()
         assert captured.out == ""
+
+
+class TestParseTrelloDateLog:
+    def test_malformed_date_emits_debug_log(self, caplog):
+        """F-014: unparseable date strings emit DEBUG log."""
+        import logging
+
+        from trache.api.client import _parse_trello_date
+
+        with caplog.at_level(logging.DEBUG, logger="trache.api.client"):
+            result = _parse_trello_date("not-a-date")
+        assert result is None
+        assert any("Failed to parse Trello date" in r.message for r in caplog.records)
+
+    def test_empty_and_none_do_not_log(self, caplog):
+        """Empty/None hit the early return before try/except — no log emitted."""
+        import logging
+
+        from trache.api.client import _parse_trello_date
+
+        with caplog.at_level(logging.DEBUG, logger="trache.api.client"):
+            assert _parse_trello_date("") is None
+            assert _parse_trello_date(None) is None
+        assert not any("Failed to parse" in r.message for r in caplog.records)
+
+
+class TestApiTimeoutEnvVar:
+    def _make_cache(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("TRELLO_API_KEY", "k")
+        monkeypatch.setenv("TRELLO_TOKEN", "t")
+        from trache.config import TracheConfig, ensure_cache_structure
+
+        cache_dir = tmp_path / "board"
+        ensure_cache_structure(cache_dir)
+        TracheConfig(board_id="board1").save(cache_dir)
+        return cache_dir
+
+    def test_default_timeout_is_60s(self, tmp_path, monkeypatch):
+        """O-012: CLI default timeout is 60s when env var unset."""
+        monkeypatch.delenv("TRACHE_API_TIMEOUT", raising=False)
+        cache_dir = self._make_cache(tmp_path, monkeypatch)
+        from trache.cli._context import get_client_and_config
+
+        client, _ = get_client_and_config(cache_dir)
+        assert client._client.timeout.connect == 60.0
+        client.close()
+
+    def test_env_var_overrides_timeout(self, tmp_path, monkeypatch):
+        """O-012: TRACHE_API_TIMEOUT env var is respected."""
+        monkeypatch.setenv("TRACHE_API_TIMEOUT", "90")
+        cache_dir = self._make_cache(tmp_path, monkeypatch)
+        from trache.cli._context import get_client_and_config
+
+        client, _ = get_client_and_config(cache_dir)
+        assert client._client.timeout.connect == 90.0
+        client.close()
+
+    def test_invalid_env_var_raises(self, tmp_path, monkeypatch):
+        """O-012: Invalid TRACHE_API_TIMEOUT fails fast with ValueError."""
+        monkeypatch.setenv("TRACHE_API_TIMEOUT", "banana")
+        cache_dir = self._make_cache(tmp_path, monkeypatch)
+        from trache.cli._context import get_client_and_config
+
+        with pytest.raises(ValueError):
+            get_client_and_config(cache_dir)

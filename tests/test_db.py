@@ -170,6 +170,16 @@ class TestCardCrud:
         ids = {c.id for c in remaining}
         assert ids == keep
 
+    def test_delete_stale_cards_large_board(self, db_dir: Path) -> None:
+        """F-004: delete_stale_cards must handle >999 cards (SQLite variable limit)."""
+        cards = [_make_card(card_id=f"card{i:022d}", title=f"Card {i}") for i in range(1200)]
+        write_cards_batch(cards, "clean", db_dir)
+        keep = {f"card{i:022d}" for i in range(600)}
+        delete_stale_cards(keep, "clean", db_dir)
+        remaining = list_cards("clean", db_dir)
+        assert len(remaining) == 600
+        assert {c.id for c in remaining} == keep
+
 
 # ---------------------------------------------------------------------------
 # Checklists

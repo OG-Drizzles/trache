@@ -6,7 +6,7 @@ import logging
 import random
 import time
 from datetime import datetime, timezone
-from typing import Any, Callable, Optional, Protocol, TypeVar, runtime_checkable
+from typing import Any, Callable, Optional, Protocol, TypeVar
 
 import httpx
 
@@ -31,19 +31,21 @@ _BASE_DELAY = 1.0
 logger = logging.getLogger(__name__)
 
 
-@runtime_checkable
 class HasStats(Protocol):
     """Protocol for type-safe stats consumption."""
 
     def get_stats(self) -> dict[str, float]: ...
 
 
-def _retry(fn: Callable[[], T]) -> T:
+def _retry(fn: Callable[[], T], *, idempotent: bool = True) -> T:
     """Retry with exponential backoff + jitter on transient errors.
 
     Retries on 429, 5xx HTTP status codes, and transport errors.
     Respects Retry-After header on 429 responses.
     Max 3 attempts, 1s base delay with jitter.
+
+    Non-idempotent calls (POST) only retry on 429 — 5xx and transport
+    errors raise immediately to avoid duplicate side effects.
     """
     last_exc: BaseException | None = None
     for attempt in range(_MAX_RETRIES):
@@ -51,7 +53,7 @@ def _retry(fn: Callable[[], T]) -> T:
             return fn()
         except httpx.HTTPStatusError as e:
             status = e.response.status_code
-            if status == 429 or status >= 500:
+            if status == 429 or (status >= 500 and idempotent):
                 last_exc = e
                 if attempt < _MAX_RETRIES - 1:
                     if status == 429:
@@ -75,6 +77,8 @@ def _retry(fn: Callable[[], T]) -> T:
             else:
                 raise
         except httpx.TransportError as e:
+            if not idempotent:
+                raise
             last_exc = e
             if attempt < _MAX_RETRIES - 1:
                 delay = _BASE_DELAY * (2 ** attempt) + random.uniform(0, 0.5)
@@ -154,7 +158,7 @@ class TrelloClient:
             resp.raise_for_status()
             return resp.json()
 
-        return _retry(_do)
+        return _retry(_do, idempotent=False)
 
     def _delete(self, path: str) -> None:
         def _do() -> None:
@@ -425,6 +429,7 @@ def _parse_trello_date(val: Optional[str]) -> Optional[datetime]:
     try:
         return datetime.fromisoformat(val.replace("Z", "+00:00"))
     except (ValueError, TypeError):
+        logger.debug("Failed to parse Trello date: %r", val)
         return None
 
 

@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from pathlib import Path
-from uuid import uuid4
 
 import typer
 from rich.markup import escape
@@ -28,43 +26,19 @@ def create(
     force: bool = typer.Option(False, "--force", help="Allow editing archived cards"),
 ) -> None:
     """Create a new checklist on a card (local-first, push to sync)."""
-    from trache.cache.db import (
-        read_card,
-        read_checklists_raw,
-        resolve_card_id,
-        write_card,
-        write_checklists_raw,
-    )
+    from trache.cache.working import create_checklist
 
     out = get_output()
     cache_dir = _cache_dir()
     guard_archived(card_identifier, cache_dir, force=force)
-    card_id = resolve_card_id(card_identifier, cache_dir)
-    checklists = read_checklists_raw(card_id, "working", cache_dir)
-
-    # Check for duplicate name
-    for cl in checklists:
-        if cl["name"] == name:
-            out.error(f"Checklist '{name}' already exists on this card")
-            raise typer.Exit(1)
-
-    temp_id = f"temp_{uuid4().hex[:14]}t~"
-    checklists.append({"id": temp_id, "name": name, "items": []})
-
-    write_checklists_raw(card_id, checklists, "working", cache_dir)
-    # Dirty the card
-    try:
-        card = read_card(card_id, "working", cache_dir)
-        card.content_modified_at = datetime.now(timezone.utc)
-        card.dirty = True
-        write_card(card, "working", cache_dir)
-    except FileNotFoundError:
-        pass
-
+    result = create_checklist(card_identifier, name, cache_dir)
     if out.is_human:
-        out.human(f"[green]Checklist created: {escape(name)} ({temp_id}) — push to sync[/green]")
+        out.human(
+            f"[green]Checklist created: {escape(result['name'])} "
+            f"({result['id']}) — push to sync[/green]"
+        )
     else:
-        out.json({"ok": True, "name": name, "id": temp_id})
+        out.json({"ok": True, "name": result["name"], "id": result["id"]})
 
 
 @checklist_app.command("show")

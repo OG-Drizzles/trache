@@ -98,9 +98,9 @@ class TestStatus:
         reset_output()
         monkeypatch.chdir(tmp_path)
         result = runner.invoke(app, ["status"])
-        # No .trache/ directory → empty diff → reports clean
+        # No .trache/ directory → uninitialised message
         assert result.exit_code == 0
-        assert "Clean" in result.output or "no local changes" in result.output
+        assert "no boards" in result.output.lower() or "nothing to report" in result.output.lower()
 
 
 class TestChecklistCheck:
@@ -667,3 +667,42 @@ class TestOnboardingAckGate:
         result = runner.invoke(app, ["pull"])
         assert result.exit_code == 1
         assert "agents --ack" in result.output
+
+
+class TestStatusBoardContext:
+    def test_status_uninitialised_no_trache_dir(self, tmp_path, monkeypatch):
+        """No .trache/ at all → reports uninitialised, not 'clean'."""
+        monkeypatch.setenv("TRACHE_HUMAN", "1")
+        from trache.cli._output import reset_output
+        reset_output()
+        monkeypatch.chdir(tmp_path)
+        result = runner.invoke(app, ["status"])
+        assert result.exit_code == 0
+        # Must NOT say "clean"
+        assert "no boards" in result.output.lower() or "nothing to report" in result.output.lower()
+
+    def test_status_uninitialised_no_boards_dir(self, tmp_path, monkeypatch):
+        """Trache root exists but boards/ does not → same uninitialised message."""
+        monkeypatch.setenv("TRACHE_HUMAN", "1")
+        from trache.cli._output import reset_output
+        reset_output()
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".trache").mkdir()
+        result = runner.invoke(app, ["status"])
+        assert result.exit_code == 0
+        assert "no boards" in result.output.lower() or "nothing to report" in result.output.lower()
+
+    def test_status_broken_config_surfaces_error(self, tmp_path, monkeypatch):
+        """boards/ exists but active points to nonexistent board → error surfaces."""
+        monkeypatch.setenv("TRACHE_HUMAN", "1")
+        from trache.cli._output import reset_output
+        reset_output()
+        monkeypatch.chdir(tmp_path)
+        trache = tmp_path / ".trache"
+        trache.mkdir()
+        (trache / "boards").mkdir()
+        (trache / "boards" / "real-board").mkdir()
+        (trache / "active").write_text("nonexistent\n")
+        result = runner.invoke(app, ["status"])
+        assert result.exit_code == 1
+        assert "not found" in result.output.lower()
