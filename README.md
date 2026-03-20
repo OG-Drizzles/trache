@@ -115,7 +115,7 @@ init → agents → agents --ack → pull → discover → read → mutate → s
 A few behaviours that aren't obvious from the happy path:
 
 - **List names aren't unique.** If your board has duplicate list names, `--list "Name"` and `card create "Name" ...` will silently pick one. Prefer list IDs or ensure names are unique.
-- **Comment commands hit the API immediately.** Unlike every other mutation, `comment add`, `comment edit`, and `comment delete` are not local-first — they write to Trello the moment you run them.
+- **Comment commands hit the API immediately.** Unlike every other mutation, `comment add`, `comment edit`, and `comment delete` are not local-first — they write to Trello the moment you run them. All three require `--yes` (or `-y`) unless you're in an interactive terminal, where you'll get a confirmation prompt.
 - **Labels are validated against the board.** `add-label` checks the label name against your board's labels (pulled into `labels.json`). Use `trache label list` to see what's available, or `trache label create` to add new ones.
 - **New cards get temporary IDs.** Locally-created cards are assigned a temp UID6 (containing `T~`) until pushed. After push, trache reconciles the temp ID to the real Trello ID and reports the mapping.
 - **Push can partially succeed.** If you push multiple cards and some fail (e.g. an invalid label), the successful ones still land. Check `trache status` after push to see what's still dirty.
@@ -137,6 +137,7 @@ A few behaviours that aren't obvious from the happy path:
 | `trache diff` | Show detailed clean vs working diff |
 | `trache batch run` | Execute multiple commands from stdin (JSON output) |
 | `trache agents` | Print agent setup instructions (`--reference` for command cheat-sheet, `--ack` to confirm onboarding) |
+| `trache health` | Run diagnostic checks on config, DB, auth, and API (`--local` to skip API check) |
 | `trache version` | Show installed version |
 
 ### Card Commands
@@ -182,9 +183,9 @@ All checklist mutations are local-first — push to sync.
 
 | Command | Description |
 |---|---|
-| `trache comment add <card> <text>` | Add a comment (`--yes` required in machine mode) |
-| `trache comment edit <card> <comment_id> <text>` | Edit a comment (`--yes` required in machine mode) |
-| `trache comment delete <card> <comment_id>` | Delete a comment (`--yes` required) |
+| `trache comment add <card> <text>` | Add a comment (`--yes`/`-y` required unless interactive TTY) |
+| `trache comment edit <card> <comment_id> <text>` | Edit a comment (`--yes`/`-y` required unless interactive TTY) |
+| `trache comment delete <card> <comment_id>` | Delete a comment (`--yes`/`-y` required unless interactive TTY) |
 | `trache comment list <card>` | List comments |
 
 **All comment commands hit the Trello API immediately.** They bypass the local-first model entirely — there is no undo via `trache status` or `trache diff`.
@@ -297,7 +298,7 @@ Trache is built for Claude Code and similar AI coding agents.
 - **`trache agents --ack`** — acknowledges onboarding after the install block has been added; required before `pull` or `sync` will work
 - **`trache agents --reference`** — prints a compact command reference designed for agent context windows
 - **Onboarding gate** — after `init`, the onboarding gate must be explicitly acknowledged via `trache agents --ack` before `pull` or `sync` will work. There is no automatic grandfathering.
-- **Machine-first output** — default output is JSON/TSV for machine consumption; set `TRACHE_HUMAN=1` for Rich-formatted human output
+- **Machine-first output** — default output is JSON/TSV for machine consumption; set `TRACHE_HUMAN=1` for Rich-formatted human output, or use `trache --json <command>` to force machine output for a single invocation
 
 ## License
 
