@@ -7,6 +7,7 @@ import webbrowser
 import click
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 
 INSTALL_BLOCK_TEMPLATE = """\
@@ -154,7 +155,7 @@ def emit_machine_init_action_required() -> None:
 
 def render_install_block(board_name: str | None = None) -> str:
     """Render the install block, optionally with board name."""
-    board_line = f"\nBoard: {board_name} (initialised)" if board_name else ""
+    board_line = f"\nBoard: {escape(board_name)} (initialised)" if board_name else ""
     return INSTALL_BLOCK_TEMPLATE.format(board_line=board_line)
 
 
