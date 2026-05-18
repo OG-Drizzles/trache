@@ -18,6 +18,13 @@ SCHEMA_VERSION = 1
 DB_FILENAME = "cache.db"
 MIGRATION_SENTINEL = "cache.db.migrated"
 
+_HEX_CHARS = frozenset("0123456789abcdef")
+
+
+def _is_trello_id(s: str) -> bool:
+    """Return True if s looks like a 24-char Trello hex ID."""
+    return len(s) == 24 and all(c in _HEX_CHARS for c in s)
+
 # Migration functions keyed by TARGET version. Each receives an open connection
 # and runs DDL/DML to bring the schema from (key-1) to key. The version row is
 # updated by the runner — migrations must NOT touch schema_version themselves.
@@ -702,8 +709,8 @@ def resolve_card_id(identifier: str, cache_dir: Path) -> str:
             "No board initialised. Run 'trache init' and 'trache pull' first."
         )
 
-    # Full 24-char ID — return as-is
-    if len(identifier) == 24:
+    # Full 24-char hex ID — return as-is
+    if _is_trello_id(identifier):
         return identifier
 
     # Validate UID6 format or temp ID
@@ -755,7 +762,7 @@ def resolve_card_id(identifier: str, cache_dir: Path) -> str:
 
 def resolve_list_id(identifier: str, cache_dir: Path) -> str:
     """Resolve a list ID or name to a full list ID."""
-    if len(identifier) == 24:
+    if _is_trello_id(identifier):
         return identifier
 
     with _connect(cache_dir) as conn:

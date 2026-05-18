@@ -22,6 +22,9 @@ def handle_resolve_errors(func):
             msg = e.args[0] if e.args else "Requested item not found"
             get_output().error(msg)
             raise typer.Exit(1)
+        except FileNotFoundError as e:
+            get_output().error(str(e))
+            raise typer.Exit(1)
         except ValueError as e:
             get_output().error(str(e))
             raise typer.Exit(1)

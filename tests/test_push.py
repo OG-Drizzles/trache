@@ -71,7 +71,7 @@ class TestPushChanges:
 
         client = MagicMock()
         new_card = Card(
-            id="real_id_from_trello_here",
+            id="aaa111bbb222ccc333ddd444",
             title=sample_card.title,
             list_id=sample_card.list_id,
         )
@@ -221,7 +221,7 @@ class TestPushNewCardChecklists:
 
         # Mock client
         real_card = Card(
-            id="real_trello_card_id_here", title="Card With Checklist", list_id="list1"
+            id="bbb222ccc333ddd444eee555", title="Card With Checklist", list_id="list1"
         )
         new_cl = Checklist(id="real_cl_1", name="Tasks", card_id=real_card.id)
         item_a = ChecklistItem(id="real_item_a", name="Do thing A")
