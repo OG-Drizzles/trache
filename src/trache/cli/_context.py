@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import sys
 from pathlib import Path
 from typing import Optional
 
-TRACHE_ROOT = Path(".trache")
+# If TRACHE_HOME is set, use it as the root; otherwise default to .trache in cwd.
+TRACHE_ROOT = Path(os.environ["TRACHE_HOME"]) if "TRACHE_HOME" in os.environ else Path(".trache")
 
 _board_override: Optional[str] = None
 
