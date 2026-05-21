@@ -175,6 +175,7 @@ def init(
 
                 try:
                     board_obj = client.get_board(config.board_id)
+                    config.board_id = board_obj.id  # Resolve short ID → full 24-char hex ID
                     config.board_name = board_obj.name
                     out.human(f"Board: [bold]{escape(board_obj.name)}[/bold]")
                 except Exception:
